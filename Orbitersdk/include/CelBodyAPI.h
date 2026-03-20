@@ -45,6 +45,8 @@ struct Sample {
 	double param[6];
 };
 
+class ATMOSPHERE;
+
 	/**
 	* \page planetmod Planet Modules
 	*

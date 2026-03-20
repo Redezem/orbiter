@@ -1,5 +1,10 @@
 Include(FetchContent)
 
+set(ORBITER_HAVE_LEGACY_TEST_TARGETS OFF)
+if(TARGET ${OrbiterTgt} AND TARGET Orbitersdk AND TARGET LuaInterpreter)
+	set(ORBITER_HAVE_LEGACY_TEST_TARGETS ON)
+endif()
+
 FetchContent_Declare(
   Catch2
   GIT_REPOSITORY https://github.com/catchorg/Catch2.git
@@ -42,8 +47,10 @@ function(add_test_file test_name)
 	set_tests_properties(${test_name} PROPERTIES TIMEOUT 30)
 endfunction()
 
-# Register unit tests
-add_test_file(Lua.Interpreter)
+if(ORBITER_HAVE_LEGACY_TEST_TARGETS)
+	# Register unit tests
+	add_test_file(Lua.Interpreter)
+endif()
 
 if (BUILD_ORBITER_SERVER)
 

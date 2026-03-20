@@ -6,9 +6,12 @@ add_custom_command(
 add_custom_target(CurrentState_htm
 	DEPENDS CurrentState.htm CurrentState_img.htm
 )
-add_dependencies(${OrbiterTgt}
-	CurrentState_htm
-)
+
+if(TARGET ${OrbiterTgt})
+	add_dependencies(${OrbiterTgt}
+		CurrentState_htm
+	)
+endif()
 
 install(FILES CurrentState.htm CurrentState_img.htm
 	DESTINATION ${ORBITER_INSTALL_HTML_DIR}/Scenarios

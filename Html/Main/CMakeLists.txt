@@ -20,9 +20,12 @@ add_custom_command(OUTPUT ${ORBITER_BINARY_HTML_DIR}/${name}.chm
 add_custom_target(${name}_chm
 	DEPENDS ${ORBITER_BINARY_HTML_DIR}/${name}.chm
 )
-add_dependencies(${OrbiterTgt}
-	${name}_chm
-)
+
+if(TARGET ${OrbiterTgt})
+	add_dependencies(${OrbiterTgt}
+		${name}_chm
+	)
+endif()
 
 install(FILES ${ORBITER_BINARY_HTML_DIR}/${name}.chm
 	DESTINATION ${ORBITER_INSTALL_HTML_DIR}

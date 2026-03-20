@@ -21,7 +21,15 @@
 
 #include "OrbiterAPI.h"
 #include <assert.h>
+
+#if defined(__SSE__) || defined(_M_IX86_FP) || defined(_M_X64) || defined(__x86_64__) || defined(__i386__)
 #include <xmmintrin.h>
+#define OAPI_HAVE_M128 1
+#else
+#define OAPI_HAVE_M128 0
+#endif
+
+#define OAPI_ALIGN_16 alignas(16)
 
 #if defined(_MSC_VER) && (_MSC_VER < 1920 ) // Microsoft Visual Studio Version 2017 and lower
 #include <algorithm>
@@ -359,7 +367,7 @@ namespace oapi {
 	* \brief 32-bit floating point 4D vector type.
 	* \note This structure is compatible with the D3DXVECTOR4 type.
 	*/
-	typedef union __declspec(align(16)) FVECTOR4
+	typedef union OAPI_ALIGN_16 FVECTOR4
 	{
 		DWORD dword_abgr() const
 		{
@@ -562,7 +570,9 @@ namespace oapi {
 			return D3DXVECTOR4(x, y, z, w);
 		}
 #endif
+#if OAPI_HAVE_M128
 		__m128 xm;
+#endif
 		float data[4];
 		struct { float x, y, z, w; };
 		struct { float r, g, b, a; };
@@ -608,7 +618,7 @@ namespace oapi {
 	* \brief Float-valued 4x4 matrix.
 	* \note This structure is compatible with the D3DXMATRIX.
 	*/
-	typedef union __declspec(align(16)) FMATRIX4
+	typedef union OAPI_ALIGN_16 FMATRIX4
 	{
 		FMATRIX4() {
 			m11 = m12 = m13, m14 = m21 = m22 = m23 = m24 = m31 = m32 = m33 = m34 = m41 = m42 = m43 = m44 = 0;

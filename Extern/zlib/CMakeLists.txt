@@ -4,6 +4,13 @@ Include(FetchContent)
 
 set(SKIP_INSTALL_ALL ON)
 
+if(APPLE)
+  find_package(ZLIB REQUIRED)
+  add_library(zlib INTERFACE)
+  target_link_libraries(zlib INTERFACE ZLIB::ZLIB)
+  return()
+endif()
+
 FetchContent_Declare(
   zlib
   GIT_REPOSITORY https://github.com/madler/zlib.git

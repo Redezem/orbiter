@@ -24,7 +24,7 @@
 #endif
 #endif
 #include <fstream>
-#include <windows.h>
+#include "OrbiterPlatform.h"
 #include <float.h>
 #include <math.h>
 #include <vector>
@@ -37,18 +37,15 @@ extern "C" {
 #include <lua/lua.h>
 }
 
-// Assumes MS VC++ compiler. Modify these statements for other compilers
-#define DLLEXPORT __declspec(dllexport)
-#define DLLIMPORT __declspec(dllimport)
-#define DLLCLBK extern "C" __declspec(dllexport)
-
 #ifdef OAPI_IMPLEMENTATION
 #define OAPIFUNC DLLEXPORT
 #else
 #define OAPIFUNC DLLIMPORT
 #endif
 
+#ifdef _MSC_VER
 #pragma warning(disable: 4201)
+#endif
 
 // Message loop return type - maintain backward compatibility for 32-bit
 #ifdef _WIN64

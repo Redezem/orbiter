@@ -5,7 +5,7 @@
 #define __DLGCTRL_H
 
 #define STRICT 1
-#include "windows.h"
+#include "OrbiterPlatform.h"
 
 void oapiRegisterCustomControls (HINSTANCE hInst);
 void oapiUnregisterCustomControls (HINSTANCE hInst);

@@ -4,6 +4,49 @@
 
 Porting Orbiter to native macOS is feasible, but it is a substantial engineering project rather than a build-system tweak.
 
+## Current Implementation Status
+
+Groundwork completed in-repo so far:
+
+- Added `Orbitersdk/include/OrbiterPlatform.h` so public SDK headers no longer directly include `windows.h`.
+- Updated the common SDK headers to compile on non-Windows hosts with Orbiter-owned type aliases.
+- Added a portable runtime layer for shared-library loading and user-data path selection under `Src/Platform`.
+- Added a portable bootstrap library under `Src/Bootstrap`.
+- Added `Orbiter_server` as a renderer-free bootstrap executable that validates scenario selection and runtime path split.
+- Added `Orbiter_macOS` scaffolding as an SDL3/Metal app bundle for first-pixels bring-up on Apple Silicon.
+- Added macOS CMake presets, `mise` tasks, and build gating so Apple hosts do not try to build the legacy Win32 stack by default.
+- Switched Apple builds to the system `ZLIB` package and made the macOS `mise` tasks use `cmake --fresh` so stale `_deps/zlib-*` state does not survive preset changes.
+- Excluded the legacy `meshc` utility from the macOS/bootstrap build because it still depends on Direct3D 7 headers and is only needed by the legacy vessel/tool chain.
+- Added runtime content-root discovery so `Orbiter_server` and the macOS app resolve `Scenarios/` from the build root instead of `Orbiter.app/Contents/MacOS`.
+- Made the macOS app behave like an interactive app by default: it now runs until the user closes the window unless `--maxframes` is explicitly provided. `Orbiter_server` still exits after bootstrap validation.
+- Added a lightweight Orbiter `.msh` reader and a minimal Metal draw path that renders the stock DeltaGlider Mk4 mesh with copied vessel textures from `Meshes/DG` and `Textures/DG`.
+- Split the Metal draw path into opaque and transparent passes and enabled back-face culling to reduce flicker on thin transparent polygons such as canopy/HUD surfaces.
+
+What is still intentionally incomplete:
+
+- The full Orbiter simulation core is not yet wired into the portable bootstrap targets.
+- The macOS app currently renders only a standalone stock DeltaGlider Mk4 model with a fixed/bootstrap camera; scenario-driven scene, HUD, MFD, planets, and other vessel rendering remain future work.
+- Legacy Win32 UI, modules, and renderer code still exist and remain the primary full-feature path.
+
+### Where We Are Now
+
+- `mise run build-macos` is able to configure and build the current Apple Silicon bootstrap path.
+- `Orbiter_server` now proves the portable launch/bootstrap path, resolves the content root correctly, validates scenario lookup, and exits.
+- `Orbiter_macOS` now opens a native SDL3/Metal window, stays open by default, resolves runtime assets from the build root, and renders the stock DeltaGlider Mk4 mesh with its copied vessel textures.
+- The bootstrap renderer now has a depth buffer, a basic lit textured mesh path, and separate opaque/transparent handling to reduce thin-polygon flicker.
+- The current macOS result is therefore no longer just "first pixels"; it is "first textured vessel rendered under a native Metal client".
+
+### Recommended Next Steps
+
+1. Wire the portable bootstrap path into real Orbiter simulation startup instead of rendering a standalone test vessel.
+2. Replace the fixed bootstrap camera with simulation-backed camera state and basic user camera controls.
+3. Load vessel selection and placement from a real scenario so the rendered DeltaGlider comes from scenario data rather than a hardwired asset path.
+4. Add a minimal scene graph path for more than one object: vessel plus a simple planetary body or pad reference geometry.
+5. Move mesh/texture loading out of the app file into a cleaner renderer asset layer so additional vessel and world assets can be added without inflating `OrbiterMacApp.mm`.
+6. Add a small debug overlay for camera state, loaded asset counts, and render timing so bring-up problems are visible without attaching a debugger.
+7. Start replacing remaining DirectInput-era assumptions with a portable input abstraction shared by the macOS host and any future non-Windows host.
+8. Decide whether the next visual milestone is "scenario vessel with movable camera" or "scenario vessel plus Earth/terrain context"; both are reasonable, but that choice should drive the next renderer/API cut.
+
 The good news:
 
 - A large part of the simulation, scenario, vessel, celestial-body, and data-processing code is ordinary C++ and should survive a platform move with moderate cleanup.

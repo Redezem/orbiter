@@ -43,6 +43,7 @@
 #include "DlgCtrl.h"
 #include "GraphicsAPI.h"
 #include "ConsoleManager.h"
+#include "DynamicLibrary.h"
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include <filesystem>
@@ -525,19 +526,19 @@ int Orbiter::GetVersion () const
 //! Finds legacy module consisting of a single DLL
 //! @return true on success
 //! @param cbufOut returns path to the plugin DLL
-static bool FindStandaloneDll(const char *path, const char *name, char* cbufOut)
+static bool FindStandaloneModule(const fs::path &path, const std::string &name, fs::path &module_path)
 {
-	sprintf (cbufOut, "%s\\%s.dll", path, name);
-	return fs::exists(cbufOut);
+	module_path = orbiter::platform::DynamicLibrary::standalone_module_path(path, name);
+	return fs::exists(module_path);
 }
 
 //! Finds module consisting of a plugin DLL inside a plugin-specific folder
 //! @return true on success
 //! @param cbufOut returns path to the plugin DLL
-static bool FindDllInPluginFolder(const char *path, const char *name, char* cbufOut)
+static bool FindModuleInPluginFolder(const fs::path &path, const std::string &name, fs::path &module_path)
 {
-	sprintf(cbufOut, "%s\\%s\\%s.dll", path, name, name);
-	return fs::exists(cbufOut);
+	module_path = orbiter::platform::DynamicLibrary::nested_module_path(path, name);
+	return fs::exists(module_path);
 }
 
 void Orbiter::LoadModules(const std::string& path, const std::list<std::string>& names)
@@ -548,9 +549,10 @@ void Orbiter::LoadModules(const std::string& path, const std::list<std::string>&
 
 void Orbiter::LoadModules(const std::string& path)
 {
+	const auto extension = orbiter::platform::DynamicLibrary::shared_library_extension();
 	for (const auto& entry : fs::directory_iterator(path)) {
 		auto fpath = entry.path();
-		if (fpath.extension().string() == ".dll") {
+		if (fpath.extension().string() == extension) {
 			LoadModule(path.c_str(), fpath.stem().string().c_str());
 		}
 	}
@@ -575,24 +577,25 @@ HINSTANCE Orbiter::LoadModule (const char *path, const char *name)
 
 	// Load the module DLL
 	HINSTANCE hDLL = NULL;
-	char cbuf[256];
-	if (FindStandaloneDll(path, name, cbuf)) // try to find standalone plugin file
+	fs::path candidate;
+	if (FindStandaloneModule(path, name, candidate)) // try to find standalone plugin file
 	{
-		hDLL = LoadLibrary (cbuf);
+		orbiter::platform::DynamicLibrary module(candidate);
+		hDLL = module.release();
 	}
 	else // try to find plugin in a plugin folder
 	{
-		char cbuf2[256];
-		if (FindDllInPluginFolder(path, name, cbuf2))
+		if (FindModuleInPluginFolder(path, name, candidate))
 		{
-			// Convert to absolute path, otherwise LoadLibraryEx fails with error code 87.
-			// See https://stackoverflow.com/questions/36275535/loadlibraryex-error-87-the-parameter-is-incorrect
-			sprintf(cbuf, "%s\\%s", cwd, cbuf2);
-			hDLL = LoadLibraryEx(cbuf, NULL, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+			orbiter::platform::DynamicLibrary module(fs::absolute(candidate));
+			hDLL = module.release();
 		}
 		else
 		{
-			LOGOUT_ERR("Could not find a module named %s. Tried %s and %s.", name, cbuf, cbuf2);
+			LOGOUT_ERR("Could not find a module named %s. Tried %s and %s.",
+				name,
+				orbiter::platform::DynamicLibrary::standalone_module_path(path, name).string().c_str(),
+				orbiter::platform::DynamicLibrary::nested_module_path(path, name).string().c_str());
 			return NULL;
 		}
 	}
@@ -603,7 +606,7 @@ HINSTANCE Orbiter::LoadModule (const char *path, const char *name)
 			if (gclient->clbkInitialise() == false) {
 				// If graphics initialization fails remove client
 				RemoveGraphicsClient(gclient);
-				FreeLibrary(hDLL);
+				orbiter::platform::DynamicLibrary::close(hDLL);
 				LOGOUT_ERR("Client Initialization Failed. Unloading  %s", name);
 				hDLL = NULL;		
 				return NULL;
@@ -617,8 +620,7 @@ HINSTANCE Orbiter::LoadModule (const char *path, const char *name)
 		LOGOUT(register_module ? "Loading module %s" : "Loading module %s (legacy interface)", name);
 		m_Plugin.push_back(module);
 	} else {
-		DWORD err = GetLastError();
-		LOGOUT_ERR ("Failed loading module %s (code %d)", cbuf, err);
+		LOGOUT_ERR ("Failed loading module %s: %s", candidate.string().c_str(), orbiter::platform::DynamicLibrary::last_error().c_str());
 	}
 	return hDLL;
 }
@@ -634,7 +636,7 @@ bool Orbiter::UnloadModule (const std::string &name)
 			LOGOUT("Unloading module %s", it->sName.c_str());
 			if (it->bLocalAlloc)
 				delete it->pModule;
-			FreeLibrary(it->hDLL);
+			orbiter::platform::DynamicLibrary::close(it->hDLL);
 			m_Plugin.erase(it);
 			return true;
 		}
@@ -653,7 +655,7 @@ bool Orbiter::UnloadModule (HINSTANCE hDLL)
 			LOGOUT("Unloading module %s", it->sName.c_str());
 			if (it->bLocalAlloc)
 				delete it->pModule;
-			FreeLibrary(it->hDLL);
+			orbiter::platform::DynamicLibrary::close(it->hDLL);
 			m_Plugin.erase(it);
 			return true;
 		}
@@ -667,7 +669,7 @@ bool Orbiter::UnloadModule (HINSTANCE hDLL)
 //-----------------------------------------------------------------------------
 OPC_Proc Orbiter::FindModuleProc (HINSTANCE hDLL, const char *procname)
 {
-	return (OPC_Proc)GetProcAddress (hDLL, procname);
+	return reinterpret_cast<OPC_Proc>(orbiter::platform::DynamicLibrary::symbol(hDLL, procname));
 }
 
 //-----------------------------------------------------------------------------

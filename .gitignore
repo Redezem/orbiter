@@ -4,6 +4,15 @@
 meshres*.h
 CMakeSettings.json
 out/**
+.mise.local.toml
+.mise.local.*
+.DS_Store
+*.app
+*.dmg
+build/
+build-*/
+dist/
+tmp/
 !/Sound/XRSound/XRSound/**/*.vcxproj.user
 **/*.bak
 

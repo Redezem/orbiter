@@ -13,11 +13,6 @@
 
 #include "Orbitersdk.h"
 #include <stdio.h>
-#include <windows.h>
-
-#ifndef _WIN32
-typedef void *HDC;
-#endif
 
 /// \defgroup cfgprm Configuration parameter identifiers
 /// Used by GraphicsClient::GetConfigParam()

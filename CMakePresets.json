@@ -15,6 +15,7 @@
       "cacheVariables": {
         "CMAKE_C_COMPILER": "cl",
         "CMAKE_CXX_COMPILER": "cl",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
         "ORBITER_MAKE_DOC": "OFF"
       },
       "environment": {
@@ -27,12 +28,38 @@
       }
     },
     {
+      "name": "macos-base",
+      "hidden": true,
+      "inherits": "ninja-base",
+      "cacheVariables": {
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "ORBITER_MAKE_DOC": false,
+        "ORBITER_MAKE_TESTS": false,
+        "ORBITER_BUILD_D3D9CLIENT": false,
+        "ORBITER_BUILD_XRSOUND": false,
+        "ORBITER_BUILD_GDICLIENT": false,
+        "ORBITER_BUILD_LEGACY_WIN32": false,
+        "ORBITER_BUILD_WINDOWS_UTILS": false,
+        "ORBITER_BUILD_SDK_SAMPLES": false,
+        "BUILD_ORBITER_SERVER": true,
+        "ORBITER_BUILD_MACOS_APP": true
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
+    },
+    {
       "name": "linux-winegcc-base",
       "inherits": "ninja-base",
       "hidden": true,
       "cacheVariables": {
         "CMAKE_C_COMPILER": "winegcc",
         "CMAKE_CXX_COMPILER": "wineg++",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
         "ORBITER_MAKE_DOC": false,
         "ORBITER_BUILD_D3D9CLIENT": false
       },
@@ -138,6 +165,22 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
+    },
+    {
+      "name": "macos-arm64-debug",
+      "displayName": "macOS arm64 Debug",
+      "inherits": "macos-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "macos-arm64-release",
+      "displayName": "macOS arm64 Release",
+      "inherits": "macos-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     }
   ],
   "buildPresets": [
@@ -180,6 +223,16 @@
       "name": "linux-x64-asan",
       "displayName": "x64 ASan",
       "configurePreset": "linux-x64-asan"
+    },
+    {
+      "name": "macos-arm64-debug",
+      "displayName": "macOS arm64 Debug",
+      "configurePreset": "macos-arm64-debug"
+    },
+    {
+      "name": "macos-arm64-release",
+      "displayName": "macOS arm64 Release",
+      "configurePreset": "macos-arm64-release"
     }
   ],
   "testPresets": [
@@ -230,6 +283,16 @@
     {
       "name": "linux-x64-asan",
       "configurePreset": "linux-x64-asan",
+      "inherits": "test-base"
+    },
+    {
+      "name": "macos-arm64-debug",
+      "configurePreset": "macos-arm64-debug",
+      "inherits": "test-base"
+    },
+    {
+      "name": "macos-arm64-release",
+      "configurePreset": "macos-arm64-release",
       "inherits": "test-base"
     }
   ]

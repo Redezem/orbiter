@@ -1,0 +1,31 @@
+[tools]
+cmake = "latest"
+ninja = "latest"
+
+[tasks.configure-macos]
+description = "Configure the Apple Silicon macOS bootstrap targets"
+run = "cmake --fresh --preset macos-arm64-debug"
+
+[tasks.build-macos]
+description = "Build the Apple Silicon macOS bootstrap targets"
+run = "cmake --fresh --preset macos-arm64-debug && cmake --build --preset macos-arm64-debug"
+
+[tasks.test-macos]
+description = "Run the macOS preset test suite"
+run = "cmake --fresh --preset macos-arm64-debug && cmake --build --preset macos-arm64-debug && ctest --preset macos-arm64-debug"
+
+[tasks.run-macos]
+description = "Run the native macOS bootstrap app against the quickstart scenario"
+run = "cmake --fresh --preset macos-arm64-debug && cmake --build --preset macos-arm64-debug && out/build/macos-arm64-debug/Orbiter.app/Contents/MacOS/Orbiter --scenariox=Scenarios/Checklists/Quickstart.scn"
+
+[tasks.clean]
+description = "Remove local build artefacts"
+run = "rm -rf out/build out/install build build-* dist tmp"
+
+[tasks.install-macos]
+description = "Install the macOS bootstrap app into the local Applications folder"
+run = "cmake --fresh --preset macos-arm64-release && cmake --build --preset macos-arm64-release && cmake --install out/build/macos-arm64-release --prefix \"$HOME/Applications\""
+
+[tasks.uninstall-macos]
+description = "Remove the locally installed macOS bootstrap app"
+run = "rm -rf \"$HOME/Applications/Orbiter.app\""

@@ -1,7 +1,15 @@
 PREREQUISITES
 =============
 
-To build Orbiter from its sources you need a C++ compiler able to create Windows binaries.
+Orbiter currently has two supported build tracks in this repository:
+
+- Legacy Win32 simulator build
+- Portable bootstrap/macOS groundwork build
+
+LEGACY WIN32 PREREQUISITES
+==========================
+
+To build the legacy simulator from its sources you need a C++ compiler able to create Windows binaries.
 Orbiter has been built successfully with Visual Studio 2019 Community
 https://visualstudio.microsoft.com/downloads/
 
@@ -15,9 +23,24 @@ https://miktex.org/download
 To build the code-level documentation, you need doxygen.
 https://www.doxygen.nl/index.html
 
+MACOS BOOTSTRAP PREREQUISITES
+=============================
+
+To build the Apple Silicon macOS bootstrap targets you need:
+
+- a recent Clang toolchain (Xcode command line tools are sufficient)
+- CMake
+- Ninja
+- SDL3 development files discoverable by CMake
+
+The repo now ships a `mise.toml` with tasks for configure/build/test/run/install/uninstall.
+
 
 BUILDING ORBITER
 ================
+Legacy Win32 path
+-----------------
+
 After cloning the Orbiter Git repository, you can either
 
 - Load the Orbiter download directory as a local directory into VS2019 or later.
@@ -45,6 +68,37 @@ Or, run CMake externally:
 
 - This should have generated a solution file (Orbiter.sln) in the build directory.
   Load this into Visual Studio, and Build All.
+
+
+MACOS BOOTSTRAP BUILD
+=====================
+
+Use the dedicated preset:
+
+```bash
+cmake --fresh --preset macos-arm64-debug
+cmake --build --preset macos-arm64-debug
+```
+
+or the equivalent `mise` workflow:
+
+```bash
+mise run configure-macos
+mise run build-macos
+mise run test-macos
+```
+
+Important notes:
+
+- The macOS preset is Apple Silicon (`arm64`) first.
+- The preset intentionally disables the legacy Win32 core, D3D9Client, GDIClient, XRSound, Windows-only utilities, and SDK sample add-ons.
+- The legacy `meshc` utility is also excluded on macOS for now because it still depends on Direct3D 7 headers.
+- `Orbiter_server` currently validates scenario/bootstrap flow.
+- `Orbiter_macOS` currently renders the stock DeltaGlider Mk4 mesh with its copied vessel textures using a minimal Metal renderer. It is not yet a full simulator port.
+- The macOS `mise` tasks intentionally reconfigure with `cmake --fresh` so stale dependency state is discarded after CMake graph changes.
+- The bootstrap path resolves runtime assets such as `Scenarios/` from the build root next to `Orbiter.app`, so running the bundle binary directly works.
+- `Orbiter_server` exits after its bootstrap validation output. `Orbiter_macOS` runs until the window is closed by default; use `--maxframes=<n>` if you want it to auto-exit.
+- The current Metal renderer separates transparent canopy/HUD-style submeshes from opaque geometry and enables back-face culling to reduce thin-polygon flicker.
   
   
 PLANETARY TEXTURES
@@ -91,3 +145,7 @@ generator, it puts binaries in configuration-dependent subdirectories (Debug/Rel
 This means that Orbiter may not find plugin DLLs. You need to run Orbiter from
 the install directory. The Ninja generator separates the Debug and Release builds
 at the top level and doesn't have that problem.
+
+* macOS configure errors about `SDL3` not being found: install SDL3 and make sure CMake can discover `SDL3Config.cmake`.
+
+* macOS build errors from `_deps/zlib-*`: the Apple path now uses the system `ZLIB` package. Remove the old build tree with `mise run clean`, then rerun `mise run build-macos`.

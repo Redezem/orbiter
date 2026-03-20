@@ -2,7 +2,9 @@
 # Licensed under the MIT License
 
 # SAFESEH linker flag must be turned off because the DX7 libraries don't support it'
-set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -SAFESEH:NO")
+if(MSVC)
+	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -SAFESEH:NO")
+endif()
 FetchContent_MakeAvailable(imgui)
 FetchContent_MakeAvailable(implot)
 
@@ -127,6 +129,7 @@ set(Orbiter_includes
 	${CMAKE_CURRENT_SOURCE_DIR}
 	${CMAKE_SOURCE_DIR}/Orbitersdk/include
 	${CMAKE_SOURCE_DIR}/OVP
+	${CMAKE_SOURCE_DIR}/Src/Platform
 	${CMAKE_CURRENT_BINARY_DIR}
 	${HTMLHELP_INCLUDE_DIR}
 )
@@ -139,6 +142,7 @@ set(Orbiter_common_libs
 	${HTML_HELP_LIBRARY}
 	zlib
 	${HTMLHELP_LIB}
+	OrbiterPlatformRuntime
 	$<TARGET_FILE:Orbitersdk>
 	$<TARGET_FILE:DlgCtrl>
 )

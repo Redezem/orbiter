@@ -1,0 +1,83 @@
+-- The C compiler identification is AppleClang 17.0.0.17000604
+-- The CXX compiler identification is AppleClang 17.0.0.17000604
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Found LATEX: /usr/local/texlive/2025/bin/universal-darwin/latex
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- TRACY_ENABLE: ON
+-- TRACY_ON_DEMAND: OFF
+-- TRACY_CALLSTACK: OFF
+-- TRACY_NO_CALLSTACK: OFF
+-- TRACY_NO_CALLSTACK_INLINES: OFF
+-- TRACY_ONLY_LOCALHOST: OFF
+-- TRACY_NO_BROADCAST: OFF
+-- TRACY_ONLY_IPV4: OFF
+-- TRACY_NO_CODE_TRANSFER: OFF
+-- TRACY_NO_CONTEXT_SWITCH: OFF
+-- TRACY_NO_EXIT: OFF
+-- TRACY_NO_SAMPLING: OFF
+-- TRACY_NO_VERIFY: OFF
+-- TRACY_NO_VSYNC_CAPTURE: OFF
+-- TRACY_NO_FRAME_IMAGE: OFF
+-- TRACY_NO_SYSTEM_TRACING: OFF
+-- TRACY_PATCHABLE_NOPSLEDS: OFF
+-- TRACY_DELAYED_INIT: OFF
+-- TRACY_MANUAL_LIFETIME: OFF
+-- TRACY_FIBERS: OFF
+-- TRACY_NO_CRASH_HANDLER: OFF
+-- TRACY_TIMER_FALLBACK: OFF
+-- TRACY_LIBUNWIND_BACKTRACE: OFF
+-- TRACY_SYMBOL_OFFLINE_RESOLVE: OFF
+-- TRACY_LIBBACKTRACE_ELF_DYNLOAD_SUPPORT: OFF
+-- TRACY_DEBUGINFOD: OFF
+-- TRACY_VERBOSE: OFF
+-- TRACY_DEMANGLE: OFF
+-- Found ZLIB: /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/libz.tbd (found version "1.2.12")
+-- The OBJCXX compiler identification is AppleClang 17.0.0.17000604
+-- Detecting OBJCXX compiler ABI info
+-- Detecting OBJCXX compiler ABI info - done
+-- Check for working OBJCXX compiler: /usr/bin/c++ - skipped
+-- Configuring done (2.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: /Users/redezem/Codeforge/orbiter/out/build/macos-arm64-debug
+[1/4] cd /Users/redezem/Codeforge/orbiter/out/build/macos-arm64-debug/Extern && /Users/redezem/.local/share/mise/installs/cmake/4.3.0/cmake-4.3.0-macos-universal/CMake.app/Contents/bin/cmake -E copy_directory /Users/redezem/Codeforge/orbiter/Extern/ldoc/ /Users/redezem/Codeforge/orbiter/out/build/macos-arm64-debug/packages/ldoc && /Users/redezem/.local/share/mise/installs/cmake/4.3.0/cmake-4.3.0-macos-universal/CMake.app/Contents/bin/cmake -E copy_directory /Users/redezem/Codeforge/orbiter/Extern/Penlight/lua/ /Users/redezem/Codeforge/orbiter/out/build/macos-arm64-debug/
+[2/4] cd /Users/redezem/Codeforge/orbiter/out/build/macos-arm64-debug && /Users/redezem/.local/share/mise/installs/cmake/4.3.0/cmake-4.3.0-macos-universal/CMake.app/Contents/bin/cmake -E copy_directory /Users/redezem/Codeforge/orbiter/BinAssets/ /Users/redezem/Codeforge/orbiter/out/build/macos-arm64-debug && /Users/redezem/.local/share/mise/installs/cmake/4.3.0/cmake-4.3.0-macos-universal/CMake.app/Contents/bin/cmake -E copy_directory /Users/redezem/Codeforge/orbiter/Scenarios/ /Users/redezem/Codeforge/orbiter/out/build/macos-arm64-debug/Scenarios && /Users/redezem/.local/share/mise/installs/cmake/4.3.0/cmake-4.3.0-macos-universal/CMake.app/Contents/bin/cmake -E copy_directory /Users/redezem/Codeforge/orbiter/Textures/ /Users/redezem/Codeforge/orbiter/out/build/macos-arm64-debug/Textures && /Users/redezem/.local/share/mise/installs/cmake/4.3.0/cmake-4.3.0-macos-universal/CMake.app/Contents/bin/cmake -E copy_directory /Users/redezem/Codeforge/orbiter/Meshes/ /Users/redezem/Codeforge/orbiter/out/build/macos-arm64-debug/Meshes && /Users/redezem/.local/share/mise/installs/cmake/4.3.0/cmake-4.3.0-macos-universal/CMake.app/Contents/bin/cmake -E copy_directory /Users/redezem/Codeforge/orbiter/Src/Vessel/DeltaGlider/Meshes/ /Users/redezem/Codeforge/orbiter/out/build/macos-arm64-debug/Meshes/DG && /Users/redezem/.local/share/mise/installs/cmake/4.3.0/cmake-4.3.0-macos-universal/CMake.app/Contents/bin/cmake -E copy_directory /Users/redezem/Codeforge/orbiter/Src/Vessel/DeltaGlider/Textures/ /Users/redezem/Codeforge/orbiter/out/build/macos-arm64-debug/Textures/DG && /Users/redezem/.local/share/mise/installs/cmake/4.3.0/cmake-4.3.0-macos-universal/CMake.app/Contents/bin/cmake -E copy_directory /Users/redezem/Codeforge/orbiter/Script/ /Users/redezem/Codeforge/orbiter/out/build/macos-arm64-debug/Script && /Users/redezem/.local/share/mise/installs/cmake/4.3.0/cmake-4.3.0-macos-universal/CMake.app/Contents/bin/cmake -E copy_directory /Users/redezem/Codeforge/orbiter/Config/ /Users/redezem/Codeforge/orbiter/out/build/macos-arm64-debug/Config && /Users/redezem/.local/share/mise/installs/cmake/4.3.0/cmake-4.3.0-macos-universal/CMake.app/Contents/bin/cmake -E copy_directory /Users/redezem/Codeforge/orbiter/GravityModels/ /Users/redezem/Codeforge/orbiter/out/build/macos-arm64-debug/GravityModels && /Users/redezem/.local/share/mise/installs/cmake/4.3.0/cmake-4.3.0-macos-universal/CMake.app/Contents/bin/cmake -E copy_directory /Users/redezem/Codeforge/orbiter/Flights/ /Users/redezem/Codeforge/orbiter/out/build/macos-arm64-debug/Flights && /Users/redezem/.local/share/mise/installs/cmake/4.3.0/cmake-4.3.0-macos-universal/CMake.app/Contents/bin/cmake -E make_directory /Users/redezem/Codeforge/orbiter/out/build/macos-arm64-debug/Orbitersdk/lib/Lua
+[3/4] Building OBJCXX object Src/OrbiterMac/CMakeFiles/Orbiter_macOS.dir/OrbiterMacApp.mm.o
+FAILED: [code=1] Src/OrbiterMac/CMakeFiles/Orbiter_macOS.dir/OrbiterMacApp.mm.o 
+/usr/bin/c++  -I/Users/redezem/Codeforge/orbiter/Orbitersdk/include -I/Users/redezem/Codeforge/orbiter/Src/Bootstrap -I/Users/redezem/Codeforge/orbiter/Src/Platform -I/opt/homebrew/include -F/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks -x objective-c++ -g -std=c++17 -arch arm64 -MD -MT Src/OrbiterMac/CMakeFiles/Orbiter_macOS.dir/OrbiterMacApp.mm.o -MF Src/OrbiterMac/CMakeFiles/Orbiter_macOS.dir/OrbiterMacApp.mm.o.d -o Src/OrbiterMac/CMakeFiles/Orbiter_macOS.dir/OrbiterMacApp.mm.o -c /Users/redezem/Codeforge/orbiter/Src/OrbiterMac/OrbiterMacApp.mm
+/Users/redezem/Codeforge/orbiter/Src/OrbiterMac/OrbiterMacApp.mm:325:6: error: type argument 'MTKTextureLoader' must be a pointer (requires a '*')
+  325 |                 id<MTKTextureLoader> texture_loader = [[MTKTextureLoader alloc] initWithDevice:device];
+      |                    ^               
+      |                                     *
+/Users/redezem/Codeforge/orbiter/Src/OrbiterMac/OrbiterMacApp.mm:325:3: error: type arguments cannot be applied to non-class type 'id'
+  325 |                 id<MTKTextureLoader> texture_loader = [[MTKTextureLoader alloc] initWithDevice:device];
+      |                 ^ ~~~~~~~~~~~~~~~~~~
+/Users/redezem/Codeforge/orbiter/Src/OrbiterMac/OrbiterMacApp.mm:430:6: error: no matching function for call to 'look_at_matrix'
+  430 |                                         look_at_matrix(
+      |                                         ^~~~~~~~~~~~~~
+/Users/redezem/Codeforge/orbiter/Src/OrbiterMac/OrbiterMacApp.mm:144:17: note: candidate function not viable: cannot convert initializer list argument to 'vector_float3' (aka 'simd_float3')
+  144 | matrix_float4x4 look_at_matrix(vector_float3 eye, vector_float3 target, vector_float3 up)
+      |                 ^              ~~~~~~~~~~~~~~~~~
+/Users/redezem/Codeforge/orbiter/Src/OrbiterMac/OrbiterMacApp.mm:463:46: error: expected ':'
+  463 |                                         [encoder setVertexBytes:&uniforms sizeof(uniforms) atIndex:1];
+      |                                                                                 ^
+      |                                                                                 :
+/Users/redezem/Codeforge/orbiter/Src/OrbiterMac/OrbiterMacApp.mm:464:48: error: expected ':'
+  464 |                                         [encoder setFragmentBytes:&uniforms sizeof(uniforms) atIndex:0];
+      |                                                                                   ^
+      |                                                                                   :
+/Users/redezem/Codeforge/orbiter/Src/OrbiterMac/OrbiterMacApp.mm:200:51: warning: result of comparison of constant 0 with expression of type 'bool' is always false [-Wtautological-constant-compare]
+  200 |                 if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD) < 0) {
+      |                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ^ ~
+1 warning and 5 errors generated.
+ninja: build stopped: subcommand failed.

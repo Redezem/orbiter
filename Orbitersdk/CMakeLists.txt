@@ -1,8 +1,10 @@
 # Copyright (c) Martin Schweiger
 # Licensed under the MIT License
 
-add_subdirectory(samples)
-add_subdirectory(sample_build)
+if(ORBITER_BUILD_SDK_SAMPLES)
+	add_subdirectory(samples)
+	add_subdirectory(sample_build)
+endif()
 
 file(GLOB_RECURSE includes
 	RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -29,9 +31,11 @@ add_custom_command(
 add_custom_target(copy_sdk_include
 	DEPENDS ${output}
 )
-add_dependencies(Orbitersdk
-	copy_sdk_include
-)
+if(TARGET Orbitersdk)
+	add_dependencies(Orbitersdk
+		copy_sdk_include
+	)
+endif()
 
 if(ORBITER_MAKE_DOC)
 	if(Doxygen_FOUND)
@@ -46,4 +50,3 @@ install(DIRECTORY html include
 # Copy Prebuild PDFs ------------------------------------------------------
 
 install(FILES doc/BuildingSamples.pdf DESTINATION ${ORBITER_INSTALL_SDK_DIR}/doc)
-

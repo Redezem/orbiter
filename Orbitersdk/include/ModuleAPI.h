@@ -11,6 +11,8 @@
 #ifndef __MODULEAPI_H
 #define __MODULEAPI_H
 
+#include "OrbiterAPI.h"
+
 namespace oapi {
 
 	/**

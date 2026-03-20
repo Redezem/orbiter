@@ -3,8 +3,28 @@
 
 cmake_minimum_required(VERSION 3.19)
 
+if(NOT DEFINED CMAKE_POLICY_VERSION_MINIMUM)
+	set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+endif()
+
 # Set the project name
 project (Orbiter VERSION 21.7.24)
+
+if(APPLE)
+	set(ORBITER_DEFAULT_BUILD_LEGACY_WIN32 OFF)
+	set(ORBITER_DEFAULT_BUILD_MACOS_APP ON)
+	set(ORBITER_DEFAULT_BUILD_SERVER ON)
+	set(ORBITER_DEFAULT_BUILD_GDICLIENT OFF)
+	set(ORBITER_DEFAULT_BUILD_WINDOWS_UTILS OFF)
+	set(ORBITER_DEFAULT_BUILD_SDK_SAMPLES OFF)
+else()
+	set(ORBITER_DEFAULT_BUILD_LEGACY_WIN32 ON)
+	set(ORBITER_DEFAULT_BUILD_MACOS_APP OFF)
+	set(ORBITER_DEFAULT_BUILD_SERVER OFF)
+	set(ORBITER_DEFAULT_BUILD_GDICLIENT ON)
+	set(ORBITER_DEFAULT_BUILD_WINDOWS_UTILS ON)
+	set(ORBITER_DEFAULT_BUILD_SDK_SAMPLES ON)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED OFF)
@@ -42,7 +62,7 @@ else()
 endif()
 
 # This is important for building using vs generator (jarmonik)
-if (NOT ${CMAKE_GENERATOR} STREQUAL "Ninja")
+if (MSVC AND NOT ${CMAKE_GENERATOR} STREQUAL "Ninja")
 	add_compile_options(/MP)
 endif()
 
@@ -99,9 +119,12 @@ set(ORBITER_TOOL_MESHC "$<TARGET_FILE:meshc>")
 set(ldoc $<TARGET_FILE:lua::exe> ${ORBITER_BINARY_ROOT_DIR}/packages/LDoc/ldoc.lua -v --multimodule)
 
 find_package(OpenGL QUIET)
-find_package(HTMLHelp)
 find_package(LATEX)
-find_package(MFC)
+
+if(WIN32)
+	find_package(HTMLHelp)
+	find_package(MFC)
+endif()
 
 # We don't query Qt with find_package because we need the 64-bit version here
 set(Qt5_x64_DIR
@@ -124,6 +147,8 @@ add_custom_target(CopyData ALL
 	COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/Scenarios/ ${CMAKE_BINARY_DIR}/Scenarios
 	COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/Textures/ ${ORBITER_BINARY_TEXTURES_DIR}
 	COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/Meshes/ ${CMAKE_BINARY_DIR}/Meshes
+	COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/Src/Vessel/DeltaGlider/Meshes/ ${CMAKE_BINARY_DIR}/Meshes/DG
+	COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/Src/Vessel/DeltaGlider/Textures/ ${ORBITER_BINARY_TEXTURES_DIR}/DG
 	COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/Script/ ${CMAKE_BINARY_DIR}/Script
 	COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/Config/ ${CMAKE_BINARY_DIR}/Config
 	COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/GravityModels/ ${CMAKE_BINARY_DIR}/GravityModels
@@ -135,20 +160,22 @@ set_target_properties(CopyData
 	FOLDER Data
 )
 
-# =====================================================================================
-# work around Html Help compiler bug returning error code
+if(WIN32)
+	# =====================================================================================
+	# work around Html Help compiler bug returning error code
 
-set(HHC_CMD ${CMAKE_CURRENT_BINARY_DIR}/cmake/hhc_fix.bat)
-file(TO_NATIVE_PATH "${HTML_HELP_COMPILER}" HHC_PATH_W)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/hhc_fix.bat.in ${HHC_CMD})
+	set(HHC_CMD ${CMAKE_CURRENT_BINARY_DIR}/cmake/hhc_fix.bat)
+	file(TO_NATIVE_PATH "${HTML_HELP_COMPILER}" HHC_PATH_W)
+	configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/hhc_fix.bat.in ${HHC_CMD})
 
 
-# =====================================================================================
-# work around pdftex returning an error because of doxygen bug
+	# =====================================================================================
+	# work around pdftex returning an error because of doxygen bug
 
-set(PDFTEX_CMD ${CMAKE_CURRENT_BINARY_DIR}/cmake/pdftex_fix.bat)
-file(TO_NATIVE_PATH "${PDFLATEX_COMPILER}" PDFTEX_PATH_W)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/pdftex_fix.bat.in ${PDFTEX_CMD})
+	set(PDFTEX_CMD ${CMAKE_CURRENT_BINARY_DIR}/cmake/pdftex_fix.bat)
+	file(TO_NATIVE_PATH "${PDFLATEX_COMPILER}" PDFTEX_PATH_W)
+	configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/pdftex_fix.bat.in ${PDFTEX_CMD})
+endif()
 
 
 # =====================================================================================
@@ -191,9 +218,45 @@ option(
 )
 
 option(
+	ORBITER_BUILD_GDICLIENT
+	"Build the legacy GDI graphics client"
+	${ORBITER_DEFAULT_BUILD_GDICLIENT}
+)
+
+option(
 	ORBITER_BUILD_XRSOUND
 	"Build XRSound module to enable sound in Orbiter"
 	ON
+)
+
+option(
+	ORBITER_BUILD_LEGACY_WIN32
+	"Build the legacy Win32 Orbiter executable and Windows-bound modules"
+	${ORBITER_DEFAULT_BUILD_LEGACY_WIN32}
+)
+
+option(
+	ORBITER_BUILD_WINDOWS_UTILS
+	"Build Windows-only utilities and external utility projects"
+	${ORBITER_DEFAULT_BUILD_WINDOWS_UTILS}
+)
+
+option(
+	ORBITER_BUILD_SDK_SAMPLES
+	"Build SDK sample add-ons"
+	${ORBITER_DEFAULT_BUILD_SDK_SAMPLES}
+)
+
+option(
+	BUILD_ORBITER_SERVER
+	"Build the portable Orbiter_server bootstrap target"
+	${ORBITER_DEFAULT_BUILD_SERVER}
+)
+
+option(
+	ORBITER_BUILD_MACOS_APP
+	"Build the native macOS SDL3/Metal bootstrap target"
+	${ORBITER_DEFAULT_BUILD_MACOS_APP}
 )
 
 option(ORBITER_MAKE_DOC
@@ -220,6 +283,15 @@ include(cmake/tracy.cmake)
 
 if(ORBITER_BUILD_XRSOUND)
 	set(IRRKLANG_DIR "" CACHE PATH "Path to the irrKlang library")
+endif()
+
+if(APPLE)
+	set(ORBITER_BUILD_D3D9CLIENT OFF CACHE BOOL "Build the D3D9 graphics client" FORCE)
+	set(ORBITER_BUILD_GDICLIENT OFF CACHE BOOL "Build the legacy GDI graphics client" FORCE)
+	set(ORBITER_BUILD_XRSOUND OFF CACHE BOOL "Build XRSound module to enable sound in Orbiter" FORCE)
+	set(ORBITER_BUILD_LEGACY_WIN32 OFF CACHE BOOL "Build the legacy Win32 Orbiter executable and Windows-bound modules" FORCE)
+	set(ORBITER_BUILD_WINDOWS_UTILS OFF CACHE BOOL "Build Windows-only utilities and external utility projects" FORCE)
+	set(ORBITER_BUILD_SDK_SAMPLES OFF CACHE BOOL "Build SDK sample add-ons" FORCE)
 endif()
 
 if(ORBITER_BUILD_D3D9CLIENT)
@@ -309,7 +381,11 @@ endif()
 configure_file(${CMAKE_SOURCE_DIR}/cmake/CPackOptions.cmake.in
 	${CMAKE_BINARY_DIR}/OrbiterCPackOptions.cmake)
 
-set(CPACK_GENERATOR "WIX;ZIP")
+if(WIN32)
+	set(CPACK_GENERATOR "WIX;ZIP")
+else()
+	set(CPACK_GENERATOR "ZIP")
+endif()
 set(CPACK_PACKAGE_NAME OpenOrbiter)
 set(CPACK_PACKAGE_VENDOR Orbitersim)
 set(CPACK_PACKAGE_DESCRIPTION "Orbiter is an Open-source spaceflight simulator for Windows PCs.")
@@ -321,11 +397,13 @@ set(CPACK_COMPONENT_Unspecified_REQUIRED TRUE)
 set(CPACK_COMPONENT_RuntimeLibraries_DESCRIPTION "System libraries used by Orbiter. Install if Orbiter fails to launch.")
 set(CPACK_RESOURCE_FILE_LICENSE ${ORBITER_SOURCE_ROOT_DIR}/cmake/LICENSE.rtf)
 set(CPACK_RESOURCE_FILE_README ${ORBITER_SOURCE_ROOT_DIR}/README.md)
-set(CPACK_WIX_UI_BANNER ${ORBITER_SOURCE_ROOT_DIR}/cmake/install_banner.bmp)
-set(CPACK_WIX_UI_DIALOG ${ORBITER_SOURCE_ROOT_DIR}/cmake/install_bkg.bmp)
-set(CPACK_WIX_PRODUCT_ICON ${ORBITER_SOURCE_ROOT_DIR}/cmake/orbiter_install.ico)
-set(CPACK_WIX_UPGRADE_GUID AB3F6483-A1A4-4ECD-ADAE-D33DF3A5AADA)
-set(CPACK_WIX_COMPONENT_INSTALL)
+if(WIN32)
+	set(CPACK_WIX_UI_BANNER ${ORBITER_SOURCE_ROOT_DIR}/cmake/install_banner.bmp)
+	set(CPACK_WIX_UI_DIALOG ${ORBITER_SOURCE_ROOT_DIR}/cmake/install_bkg.bmp)
+	set(CPACK_WIX_PRODUCT_ICON ${ORBITER_SOURCE_ROOT_DIR}/cmake/orbiter_install.ico)
+	set(CPACK_WIX_UPGRADE_GUID AB3F6483-A1A4-4ECD-ADAE-D33DF3A5AADA)
+	set(CPACK_WIX_COMPONENT_INSTALL)
+endif()
 set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_BINARY_DIR}/OrbiterCPackOptions.cmake")
 
 include(OrbiterCPackOptions)
