@@ -1,0 +1,9 @@
+- ## Top-Level Directives
+	- 1. Keep every Markdown document in this repository current at the end of each task.
+	- 2. Maintain this file as the primary contributor guide for future code agents.
+	- 3. Preserve a changelog below as append-only and date-stamped.
+	- 4. Rewrite the handoff section completely after every task so the next agent starts from current reality. If it's not there, create it.
+	- 5. Ensure `.gitignore` excludes build artefacts, packaging output, and local-only tool state.
+	- 6. Remove build artefacts before returning control to the user.
+	- 7. Use `mise` to manage the build environment. This should include at the bare minimum tasks for building, cleaning, testing, running, installing, and uninstalling the components of the project.
+		- NOTE: cmd line tools should install to $HOME/.local/bin. Mac applications should install to $HOME/Applications. Linux applications should install to /usr/local/bin. Windows applications should install to a relevant subdirectory under C:/Program Files/
