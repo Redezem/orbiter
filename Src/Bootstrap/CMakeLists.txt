@@ -3,6 +3,8 @@
 
 add_library(OrbiterBootstrap STATIC
 	Bootstrap.cpp
+	OrbiterMesh.cpp
+	SimulationSession.cpp
 )
 
 target_include_directories(OrbiterBootstrap

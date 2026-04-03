@@ -2,7 +2,7 @@
 // Licensed under the MIT License
 
 #include "OrbiterMacApp.h"
-#include "OrbiterMesh.h"
+#include "SimulationSession.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_metal.h>
@@ -38,6 +38,12 @@ struct FrameUniforms {
 	matrix_float4x4 model;
 	vector_float4 base_color;
 	vector_float4 light_dir;
+};
+
+struct GpuMeshAsset {
+	id<MTLBuffer> vertex_buffer = nil;
+	id<MTLBuffer> index_buffer = nil;
+	std::vector<id<MTLTexture>> textures;
 };
 
 static NSString *const kShaderSource = @R"(
@@ -83,12 +89,13 @@ fragment float4 orbiter_fragment(
 	constant FrameUniforms &uniforms [[buffer(0)]])
 {
 	const float4 texel = diffuse_map.sample(diffuse_sampler, in.uv);
+	const float alpha = texel.a * uniforms.base_color.a;
 	const float3 albedo = texel.rgb * uniforms.base_color.rgb;
 	const float3 normal = normalize(in.normal);
 	const float3 light = normalize(uniforms.light_dir.xyz);
 	const float diffuse = max(dot(normal, light), 0.0);
 	const float lighting = 0.22 + diffuse * 0.78;
-	return float4(albedo * lighting, 1.0);
+	return float4(albedo * lighting, alpha);
 }
 )";
 
@@ -101,6 +108,15 @@ matrix_float4x4 translation_matrix(float x, float y, float z)
 {
 	matrix_float4x4 matrix = identity_matrix();
 	matrix.columns[3] = {x, y, z, 1.0f};
+	return matrix;
+}
+
+matrix_float4x4 scale_matrix(float x, float y, float z)
+{
+	matrix_float4x4 matrix = identity_matrix();
+	matrix.columns[0][0] = x;
+	matrix.columns[1][1] = y;
+	matrix.columns[2][2] = z;
 	return matrix;
 }
 
@@ -124,6 +140,18 @@ matrix_float4x4 rotation_y_matrix(float angle)
 		{c, 0.0f, -s, 0.0f},
 		{0.0f, 1.0f, 0.0f, 0.0f},
 		{s, 0.0f, c, 0.0f},
+		{0.0f, 0.0f, 0.0f, 1.0f},
+	}};
+}
+
+matrix_float4x4 rotation_z_matrix(float angle)
+{
+	const float c = std::cos(angle);
+	const float s = std::sin(angle);
+	return {{
+		{c, s, 0.0f, 0.0f},
+		{-s, c, 0.0f, 0.0f},
+		{0.0f, 0.0f, 1.0f, 0.0f},
 		{0.0f, 0.0f, 0.0f, 1.0f},
 	}};
 }
@@ -155,7 +183,7 @@ matrix_float4x4 look_at_matrix(vector_float3 eye, vector_float3 target, vector_f
 	}};
 }
 
-id<MTLTexture> create_placeholder_texture(id<MTLDevice> device)
+id<MTLTexture> create_solid_texture(id<MTLDevice> device, uint32_t rgba)
 {
 	MTLTextureDescriptor *descriptor =
 		[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
@@ -167,12 +195,7 @@ id<MTLTexture> create_placeholder_texture(id<MTLDevice> device)
 		return nil;
 	}
 
-	const uint32_t pixels[4] = {
-		0xffd030d0u,
-		0xff101010u,
-		0xff101010u,
-		0xffd030d0u,
-	};
+	const uint32_t pixels[4] = {rgba, rgba, rgba, rgba};
 	[texture replaceRegion:MTLRegionMake2D(0, 0, 2, 2)
 			   mipmapLevel:0
 				 withBytes:pixels
@@ -180,20 +203,107 @@ id<MTLTexture> create_placeholder_texture(id<MTLDevice> device)
 	return texture;
 }
 
+matrix_float4x4 model_matrix_for_instance(const orbiter::bootstrap::MeshInstance &instance)
+{
+	const matrix_float4x4 translation = translation_matrix(
+		static_cast<float>(instance.position.x),
+		static_cast<float>(instance.position.y),
+		static_cast<float>(instance.position.z));
+	const matrix_float4x4 rotation =
+		matrix_multiply(
+			rotation_y_matrix(static_cast<float>(instance.rotation_degrees.y * kPi / 180.0)),
+			matrix_multiply(
+				rotation_x_matrix(static_cast<float>(instance.rotation_degrees.x * kPi / 180.0)),
+				rotation_z_matrix(static_cast<float>(instance.rotation_degrees.z * kPi / 180.0))));
+	const matrix_float4x4 scale = scale_matrix(
+		static_cast<float>(instance.scale.x),
+		static_cast<float>(instance.scale.y),
+		static_cast<float>(instance.scale.z));
+	return matrix_multiply(translation, matrix_multiply(rotation, scale));
+}
+
+bool build_gpu_mesh_assets(
+	id<MTLDevice> device,
+	MTKTextureLoader *texture_loader,
+	const std::filesystem::path &textures_root,
+	const orbiter::bootstrap::FrameScene &scene,
+	std::vector<GpuMeshAsset> &gpu_assets,
+	std::string &error)
+{
+	id<MTLTexture> placeholder_texture = create_solid_texture(device, 0xffffffffu);
+	gpu_assets.clear();
+	gpu_assets.resize(scene.assets.size());
+
+	for (size_t asset_index = 0; asset_index < scene.assets.size(); ++asset_index) {
+		const orbiter::bootstrap::MeshAsset &asset = scene.assets[asset_index];
+		GpuMeshAsset &gpu_asset = gpu_assets[asset_index];
+		std::vector<ShaderVertex> gpu_vertices(asset.mesh.vertices.size());
+		for (size_t i = 0; i < asset.mesh.vertices.size(); ++i) {
+			gpu_vertices[i].position = {
+				asset.mesh.vertices[i].position[0],
+				asset.mesh.vertices[i].position[1],
+				asset.mesh.vertices[i].position[2],
+			};
+			gpu_vertices[i].normal = {
+				asset.mesh.vertices[i].normal[0],
+				asset.mesh.vertices[i].normal[1],
+				asset.mesh.vertices[i].normal[2],
+			};
+			gpu_vertices[i].uv = {
+				asset.mesh.vertices[i].uv[0],
+				asset.mesh.vertices[i].uv[1],
+			};
+		}
+
+		gpu_asset.vertex_buffer =
+			[device newBufferWithBytes:gpu_vertices.data()
+								length:sizeof(ShaderVertex) * gpu_vertices.size()
+							   options:MTLResourceStorageModeShared];
+		gpu_asset.index_buffer =
+			[device newBufferWithBytes:asset.mesh.indices.data()
+								length:sizeof(uint16_t) * asset.mesh.indices.size()
+							   options:MTLResourceStorageModeShared];
+		if (!gpu_asset.vertex_buffer || !gpu_asset.index_buffer) {
+			error = "Failed to create Metal mesh buffers for " + asset.id;
+			return false;
+		}
+
+		gpu_asset.textures.resize(std::max<size_t>(asset.mesh.textures.size(), 1u), placeholder_texture);
+		for (size_t i = 0; i < asset.mesh.textures.size(); ++i) {
+			const std::filesystem::path texture_path =
+				orbiter::bootstrap::resolve_orbiter_asset_path(textures_root, asset.mesh.textures[i]);
+			if (texture_path.empty() || !std::filesystem::exists(texture_path)) {
+				continue;
+			}
+
+			NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:texture_path.string().c_str()]];
+			NSDictionary *options_dict = @{
+				MTKTextureLoaderOptionSRGB : @NO,
+				MTKTextureLoaderOptionGenerateMipmaps : @YES
+			};
+			NSError *texture_error = nil;
+			id<MTLTexture> texture = [texture_loader newTextureWithContentsOfURL:url
+																	 options:options_dict
+																	   error:&texture_error];
+			if (!texture) {
+				continue;
+			}
+			gpu_asset.textures[i] = texture;
+		}
+	}
+
+	return true;
+}
+
 } // namespace
 
 int run_app(const orbiter::bootstrap::LaunchOptions &options)
 {
 	@autoreleasepool {
-		const std::filesystem::path mesh_path =
-			options.content_root / "Meshes" / "DG" / "deltaglider.msh";
-		const std::filesystem::path textures_root =
-			options.content_root / "Textures";
-
-		LoadedMesh mesh;
-		std::string mesh_error;
-		if (!load_orbiter_mesh(mesh_path, mesh, mesh_error)) {
-			std::cerr << mesh_error << '\n';
+		orbiter::bootstrap::SimulationSession session;
+		std::string error;
+		if (!session.initialize(options, error)) {
+			std::cerr << error << '\n';
 			return 20;
 		}
 
@@ -203,9 +313,9 @@ int run_app(const orbiter::bootstrap::LaunchOptions &options)
 		}
 
 		SDL_Window *window = SDL_CreateWindow(
-			"Orbiter macOS Bootstrap",
-			1280,
-			720,
+			"Orbiter macOS",
+			1440,
+			900,
 			SDL_WINDOW_RESIZABLE | SDL_WINDOW_METAL);
 		if (!window) {
 			std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << '\n';
@@ -318,66 +428,20 @@ int run_app(const orbiter::bootstrap::LaunchOptions &options)
 		sampler_descriptor.tAddressMode = MTLSamplerAddressModeRepeat;
 		id<MTLSamplerState> sampler_state = [device newSamplerStateWithDescriptor:sampler_descriptor];
 
-		std::vector<ShaderVertex> gpu_vertices(mesh.vertices.size());
-		for (size_t i = 0; i < mesh.vertices.size(); ++i) {
-			gpu_vertices[i].position = {
-				mesh.vertices[i].position[0],
-				mesh.vertices[i].position[1],
-				mesh.vertices[i].position[2],
-			};
-			gpu_vertices[i].normal = {
-				mesh.vertices[i].normal[0],
-				mesh.vertices[i].normal[1],
-				mesh.vertices[i].normal[2],
-			};
-			gpu_vertices[i].uv = {
-				mesh.vertices[i].uv[0],
-				mesh.vertices[i].uv[1],
-			};
-		}
-
-		id<MTLBuffer> vertex_buffer =
-			[device newBufferWithBytes:gpu_vertices.data()
-								length:sizeof(ShaderVertex) * gpu_vertices.size()
-							   options:MTLResourceStorageModeShared];
-		id<MTLBuffer> index_buffer =
-			[device newBufferWithBytes:mesh.indices.data()
-								length:sizeof(uint16_t) * mesh.indices.size()
-							   options:MTLResourceStorageModeShared];
-		if (!vertex_buffer || !index_buffer) {
-			std::cerr << "Failed to create Metal mesh buffers\n";
+		MTKTextureLoader *texture_loader = [[MTKTextureLoader alloc] initWithDevice:device];
+		std::vector<GpuMeshAsset> gpu_assets;
+		if (!build_gpu_mesh_assets(
+				device,
+				texture_loader,
+				options.content_root / "Textures",
+				session.frame_scene(),
+				gpu_assets,
+				error)) {
+			std::cerr << error << '\n';
 			SDL_Metal_DestroyView(metal_view);
 			SDL_DestroyWindow(window);
 			SDL_Quit();
 			return 19;
-		}
-
-		MTKTextureLoader *texture_loader = [[MTKTextureLoader alloc] initWithDevice:device];
-		id<MTLTexture> placeholder_texture = create_placeholder_texture(device);
-		std::vector<id<MTLTexture>> textures(mesh.textures.size(), placeholder_texture);
-		for (size_t i = 0; i < mesh.textures.size(); ++i) {
-			const std::filesystem::path texture_path =
-				resolve_orbiter_asset_path(textures_root, mesh.textures[i]);
-			if (texture_path.empty() || !std::filesystem::exists(texture_path)) {
-				std::cerr << "Texture not found: " << mesh.textures[i] << '\n';
-				continue;
-			}
-
-			NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:texture_path.string().c_str()]];
-			NSDictionary *options_dict = @{
-				MTKTextureLoaderOptionSRGB : @NO,
-				MTKTextureLoaderOptionGenerateMipmaps : @YES
-			};
-			NSError *texture_error = nil;
-			id<MTLTexture> texture = [texture_loader newTextureWithContentsOfURL:url
-																	 options:options_dict
-																	   error:&texture_error];
-			if (!texture) {
-				std::cerr << "Failed to load texture " << texture_path
-						  << ": " << [[texture_error localizedDescription] UTF8String] << '\n';
-				continue;
-			}
-			textures[i] = texture;
 		}
 
 		id<MTLCommandQueue> command_queue = [device newCommandQueue];
@@ -390,22 +454,87 @@ int run_app(const orbiter::bootstrap::LaunchOptions &options)
 		}
 
 		std::cout
-			<< "Orbiter_macOS bootstrap\n"
+			<< "Orbiter_macOS session\n"
 			<< "Content root: " << options.content_root << '\n'
 			<< "Scenario: " << options.scenario_path << '\n'
-			<< "Mesh: " << mesh_path << '\n'
 			<< "User data: " << options.user_data_root << '\n';
+		for (const std::string &warning : session.warnings()) {
+			std::cout << "Warning: " << warning << '\n';
+		}
 
 		id<MTLTexture> depth_texture = nil;
 		bool running = true;
+		bool dragging = false;
+		double camera_yaw_delta = 0.0;
+		double camera_pitch_delta = 0.0;
+		double camera_zoom_delta = 0.0;
 		int frames = 0;
+		uint64_t previous_ticks = SDL_GetTicks();
+
 		while (running && (options.max_frames == 0 || frames < options.max_frames)) {
+			orbiter::bootstrap::ControlInput input{};
+
 			SDL_Event event;
 			while (SDL_PollEvent(&event)) {
 				if (event.type == SDL_EVENT_QUIT) {
 					running = false;
+				} else if (event.type == SDL_EVENT_KEY_DOWN &&
+						   !event.key.repeat &&
+						   event.key.scancode == SDL_SCANCODE_P) {
+					input.pause_toggle = true;
+				} else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+						   event.button.button == SDL_BUTTON_LEFT) {
+					dragging = true;
+				} else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP &&
+						   event.button.button == SDL_BUTTON_LEFT) {
+					dragging = false;
+				} else if (event.type == SDL_EVENT_MOUSE_MOTION && dragging) {
+					camera_yaw_delta += -event.motion.xrel * 0.004;
+					camera_pitch_delta += -event.motion.yrel * 0.004;
+				} else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+					camera_zoom_delta += -event.wheel.y * 4.0;
 				}
 			}
+
+			const bool *keyboard = SDL_GetKeyboardState(nullptr);
+			input.thrust = 0.0;
+			if (keyboard[SDL_SCANCODE_W]) {
+				input.thrust += 1.0;
+			}
+			if (keyboard[SDL_SCANCODE_S]) {
+				input.thrust -= 1.0;
+			}
+			if (keyboard[SDL_SCANCODE_UP]) {
+				input.pitch -= 1.0;
+			}
+			if (keyboard[SDL_SCANCODE_DOWN]) {
+				input.pitch += 1.0;
+			}
+			if (keyboard[SDL_SCANCODE_LEFT]) {
+				input.roll -= 1.0;
+			}
+			if (keyboard[SDL_SCANCODE_RIGHT]) {
+				input.roll += 1.0;
+			}
+			if (keyboard[SDL_SCANCODE_A]) {
+				input.yaw -= 1.0;
+			}
+			if (keyboard[SDL_SCANCODE_D]) {
+				input.yaw += 1.0;
+			}
+			input.hover_hold = keyboard[SDL_SCANCODE_SPACE];
+			input.camera_yaw_delta = camera_yaw_delta;
+			input.camera_pitch_delta = camera_pitch_delta;
+			input.camera_zoom_delta = camera_zoom_delta;
+			camera_yaw_delta = 0.0;
+			camera_pitch_delta = 0.0;
+			camera_zoom_delta = 0.0;
+
+			const uint64_t now_ticks = SDL_GetTicks();
+			const double dt = std::max(0.001, static_cast<double>(now_ticks - previous_ticks) / 1000.0);
+			previous_ticks = now_ticks;
+			session.step(dt, input);
+			const orbiter::bootstrap::FrameScene &scene = session.frame_scene();
 
 			int width = 0;
 			int height = 0;
@@ -430,7 +559,7 @@ int run_app(const orbiter::bootstrap::LaunchOptions &options)
 				pass.colorAttachments[0].texture = drawable.texture;
 				pass.colorAttachments[0].loadAction = MTLLoadActionClear;
 				pass.colorAttachments[0].storeAction = MTLStoreActionStore;
-				pass.colorAttachments[0].clearColor = MTLClearColorMake(0.02, 0.03, 0.05, 1.0);
+				pass.colorAttachments[0].clearColor = MTLClearColorMake(0.47, 0.62, 0.82, 1.0);
 				pass.depthAttachment.texture = depth_texture;
 				pass.depthAttachment.loadAction = MTLLoadActionClear;
 				pass.depthAttachment.storeAction = MTLStoreActionDontCare;
@@ -438,89 +567,91 @@ int run_app(const orbiter::bootstrap::LaunchOptions &options)
 
 				id<MTLCommandBuffer> command_buffer = [command_queue commandBuffer];
 				id<MTLRenderCommandEncoder> encoder = [command_buffer renderCommandEncoderWithDescriptor:pass];
-				[encoder setRenderPipelineState:opaque_pipeline_state];
-				[encoder setDepthStencilState:opaque_depth_state];
 				[encoder setFrontFacingWinding:MTLWindingCounterClockwise];
 				[encoder setCullMode:MTLCullModeBack];
-				[encoder setVertexBuffer:vertex_buffer offset:0 atIndex:0];
 				[encoder setFragmentSamplerState:sampler_state atIndex:0];
 
 				const float aspect = std::max(width, 1) / static_cast<float>(std::max(height, 1));
-				const float fov = 55.0f * kPi / 180.0f;
-				const float distance = mesh.radius * 2.4f;
-				const float seconds = SDL_GetTicks() * 0.001f;
+				const float fov = scene.camera.fov_degrees * kPi / 180.0f;
+				const matrix_float4x4 view = look_at_matrix(
+					(vector_float3){
+						static_cast<float>(scene.camera.position.x),
+						static_cast<float>(scene.camera.position.y),
+						static_cast<float>(scene.camera.position.z)},
+					(vector_float3){
+						static_cast<float>(scene.camera.target.x),
+						static_cast<float>(scene.camera.target.y),
+						static_cast<float>(scene.camera.target.z)},
+					(vector_float3){0.0f, 1.0f, 0.0f});
+				const matrix_float4x4 projection = perspective_matrix(fov, aspect, 0.1f, 30000.0f);
 
-				const matrix_float4x4 model =
-					matrix_multiply(
-						rotation_y_matrix(seconds * 0.35f),
-						matrix_multiply(
-							rotation_x_matrix(-0.22f),
-							translation_matrix(-mesh.center[0], -mesh.center[1], -mesh.center[2])));
-				const matrix_float4x4 view =
-					look_at_matrix(
-						(vector_float3){0.0f, mesh.radius * 0.2f, distance},
-						(vector_float3){0.0f, 0.0f, 0.0f},
-						(vector_float3){0.0f, 1.0f, 0.0f});
-				const matrix_float4x4 projection =
-					perspective_matrix(fov, aspect, 0.1f, std::max(50.0f, mesh.radius * 12.0f));
-				const matrix_float4x4 mvp = matrix_multiply(projection, matrix_multiply(view, model));
+				auto draw_instance = ^(const orbiter::bootstrap::MeshInstance &instance) {
+					if (instance.asset_index >= scene.assets.size() || instance.asset_index >= gpu_assets.size()) {
+						return;
+					}
 
-				auto draw_submesh = ^(const MeshSubmesh &submesh) {
-					FrameUniforms uniforms{};
-					uniforms.mvp = mvp;
-					uniforms.model = model;
-					uniforms.light_dir = simd_normalize((vector_float4){0.35f, 0.8f, 0.45f, 0.0f});
-					if (submesh.material_index >= 0 &&
-						submesh.material_index < static_cast<int>(mesh.materials.size())) {
-						const MeshMaterial &material = mesh.materials[static_cast<size_t>(submesh.material_index)];
+					const orbiter::bootstrap::MeshAsset &asset = scene.assets[instance.asset_index];
+					const GpuMeshAsset &gpu_asset = gpu_assets[instance.asset_index];
+					const matrix_float4x4 model = model_matrix_for_instance(instance);
+					const matrix_float4x4 mvp = matrix_multiply(projection, matrix_multiply(view, model));
+
+					[encoder setVertexBuffer:gpu_asset.vertex_buffer offset:0 atIndex:0];
+					for (const orbiter::bootstrap::MeshSubmesh &submesh : asset.mesh.submeshes) {
+						FrameUniforms uniforms{};
+						uniforms.mvp = mvp;
+						uniforms.model = model;
 						uniforms.base_color = {
-							material.diffuse[0],
-							material.diffuse[1],
-							material.diffuse[2],
-							material.diffuse[3],
+							instance.color.r,
+							instance.color.g,
+							instance.color.b,
+							instance.color.a,
 						};
-					} else {
-						uniforms.base_color = {1.0f, 1.0f, 1.0f, 1.0f};
-					}
+						if (submesh.material_index >= 0 &&
+							submesh.material_index < static_cast<int>(asset.mesh.materials.size())) {
+							const orbiter::bootstrap::MeshMaterial &material =
+								asset.mesh.materials[static_cast<size_t>(submesh.material_index)];
+							uniforms.base_color.x *= material.diffuse[0];
+							uniforms.base_color.y *= material.diffuse[1];
+							uniforms.base_color.z *= material.diffuse[2];
+							uniforms.base_color.w *= material.diffuse[3];
+						}
+						uniforms.light_dir = simd_normalize((vector_float4){0.45f, 0.85f, 0.25f, 0.0f});
 
-					id<MTLTexture> texture = placeholder_texture;
-					if (submesh.texture_index >= 0 &&
-						submesh.texture_index < static_cast<int>(textures.size()) &&
-						textures[static_cast<size_t>(submesh.texture_index)]) {
-						texture = textures[static_cast<size_t>(submesh.texture_index)];
-					}
+						id<MTLTexture> texture = gpu_asset.textures.empty() ? nil : gpu_asset.textures.front();
+						if (submesh.texture_index >= 0 &&
+							submesh.texture_index < static_cast<int>(gpu_asset.textures.size())) {
+							texture = gpu_asset.textures[static_cast<size_t>(submesh.texture_index)];
+						}
 
-					[encoder setVertexBytes:&uniforms length:sizeof(uniforms) atIndex:1];
-					[encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:0];
-					[encoder setFragmentTexture:texture atIndex:0];
-					[encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
-										indexCount:submesh.index_count
-										 indexType:MTLIndexTypeUInt16
-									   indexBuffer:index_buffer
-								 indexBufferOffset:submesh.index_offset * sizeof(uint16_t)];
+						[encoder setRenderPipelineState:submesh.transparent ? transparent_pipeline_state : opaque_pipeline_state];
+						[encoder setDepthStencilState:submesh.transparent ? transparent_depth_state : opaque_depth_state];
+						[encoder setVertexBytes:&uniforms length:sizeof(uniforms) atIndex:1];
+						[encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:0];
+						[encoder setFragmentTexture:texture atIndex:0];
+						[encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+											indexCount:submesh.index_count
+											 indexType:MTLIndexTypeUInt16
+										   indexBuffer:gpu_asset.index_buffer
+									 indexBufferOffset:submesh.index_offset * sizeof(uint16_t)];
+					}
 				};
 
-				for (const MeshSubmesh &submesh : mesh.submeshes) {
-					if (!submesh.transparent) {
-						[encoder setRenderPipelineState:opaque_pipeline_state];
-						[encoder setDepthStencilState:opaque_depth_state];
-						draw_submesh(submesh);
-					}
+				for (const orbiter::bootstrap::TerrainPatch &patch : scene.terrain_patches) {
+					draw_instance(patch.mesh);
+				}
+				for (const orbiter::bootstrap::BaseInstance &base : scene.base_instances) {
+					draw_instance(base.mesh);
+				}
+				for (const orbiter::bootstrap::MeshInstance &vessel : scene.vessel_instances) {
+					draw_instance(vessel);
 				}
 
-				for (const MeshSubmesh &submesh : mesh.submeshes) {
-					if (submesh.transparent) {
-						[encoder setRenderPipelineState:transparent_pipeline_state];
-						[encoder setDepthStencilState:transparent_depth_state];
-						draw_submesh(submesh);
-					}
-				}
 				[encoder endEncoding];
 				[command_buffer presentDrawable:drawable];
 				[command_buffer commit];
 			}
 
-			SDL_Delay(16);
+			SDL_Delay(1);
 			++frames;
 		}
 

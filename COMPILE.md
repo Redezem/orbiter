@@ -93,12 +93,14 @@ Important notes:
 - The macOS preset is Apple Silicon (`arm64`) first.
 - The preset intentionally disables the legacy Win32 core, D3D9Client, GDIClient, XRSound, Windows-only utilities, and SDK sample add-ons.
 - The legacy `meshc` utility is also excluded on macOS for now because it still depends on Direct3D 7 headers.
-- `Orbiter_server` currently validates scenario/bootstrap flow.
-- `Orbiter_macOS` currently renders the stock DeltaGlider Mk4 mesh with its copied vessel textures using a minimal Metal renderer. It is not yet a full simulator port.
+- `Orbiter_server` now loads `Scenarios/Quadcopter/Quadcopter at KSC.scn`, steps the native bootstrap session, and reports focus vessel state at exit.
+- `Orbiter_macOS` now loads the same scenario and renders the Quadcopter plus Cape Canaveral/KSC scene geometry through the shared bootstrap session layer. It is still not a full simulator port.
 - The macOS `mise` tasks intentionally reconfigure with `cmake --fresh` so stale dependency state is discarded after CMake graph changes.
 - The bootstrap path resolves runtime assets such as `Scenarios/` from the build root next to `Orbiter.app`, so running the bundle binary directly works.
-- `Orbiter_server` exits after its bootstrap validation output. `Orbiter_macOS` runs until the window is closed by default; use `--maxframes=<n>` if you want it to auto-exit.
-- The current Metal renderer separates transparent canopy/HUD-style submeshes from opaque geometry and enables back-face culling to reduce thin-polygon flicker.
+- `CopyData` now also stages the Quadcopter mesh and the Earth base config needed for the native KSC scenario path.
+- `Orbiter_macOS` runs until the window is closed by default; use `--maxframes=<n>` if you want it to auto-exit.
+- The current Metal renderer separates transparent submeshes from opaque geometry, enables back-face culling, and consumes scenario-driven vessel/base/ground instances from the shared session.
+- The repo still does not include Earth terrain/elevation archives, so the native KSC scene currently uses a procedural ground fallback instead of real planetary tiles.
   
   
 PLANETARY TEXTURES

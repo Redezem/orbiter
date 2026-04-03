@@ -15,8 +15,8 @@ description = "Run the macOS preset test suite"
 run = "cmake --fresh --preset macos-arm64-debug && cmake --build --preset macos-arm64-debug && ctest --preset macos-arm64-debug"
 
 [tasks.run-macos]
-description = "Run the native macOS bootstrap app against the quickstart scenario"
-run = "cmake --fresh --preset macos-arm64-debug && cmake --build --preset macos-arm64-debug && out/build/macos-arm64-debug/Orbiter.app/Contents/MacOS/Orbiter --scenariox=Scenarios/Checklists/Quickstart.scn"
+description = "Run the native macOS bootstrap app against the Quadcopter KSC scenario"
+run = "cmake --fresh --preset macos-arm64-debug && cmake --build --preset macos-arm64-debug && out/build/macos-arm64-debug/Orbiter.app/Contents/MacOS/Orbiter --scenariox='Scenarios/Quadcopter/Quadcopter at KSC.scn'"
 
 [tasks.clean]
 description = "Remove local build artefacts"

@@ -17,7 +17,6 @@ find_library(QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
 
 add_executable(Orbiter_macOS MACOSX_BUNDLE
 	main.cpp
-	OrbiterMesh.cpp
 	OrbiterMacApp.mm
 )
 

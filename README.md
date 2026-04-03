@@ -20,7 +20,7 @@ This repository now contains two active build tracks:
 - The legacy Win32 simulator path, which still carries the full historical Orbiter implementation.
 - A new portable bootstrap path for macOS groundwork, built around `Orbiter_server` and `Orbiter_macOS`.
 
-The macOS track is intentionally early-stage. It currently focuses on portable build/runtime seams, scenario bootstrapping, and an SDL3/Metal window bring-up rather than full simulator parity.
+The macOS track is still early-stage, but it has moved past first-pixels bring-up. It now focuses on a native single-scenario bootstrap path around the Quadcopter KSC scene rather than full simulator parity.
 
 ## License
 
@@ -73,8 +73,8 @@ The legacy Windows path still carries historical Win32 assumptions and Windows-o
 
 The repository now includes an Apple Silicon macOS bootstrap path:
 
-- `Orbiter_server`: a portable scenario/bootstrap executable for validating the non-Windows build graph.
-- `Orbiter_macOS`: an SDL3/Metal app bundle that opens a native window and renders the stock DeltaGlider Mk4 mesh with copied vessel textures.
+- `Orbiter_server`: a portable headless session runner that loads the Quadcopter KSC scenario, steps native bootstrap physics, and reports focus state.
+- `Orbiter_macOS`: an SDL3/Metal app bundle that opens a native window, loads the same scenario, and renders the Quadcopter plus Cape Canaveral/KSC scene geometry.
 
 Current macOS prerequisites:
 
@@ -97,13 +97,14 @@ mise run build-macos
 mise run run-macos
 ```
 
-The macOS target is a groundwork milestone, not a full simulator yet. It validates the portable SDK headers, runtime path split, scenario argument handling, and Metal-backed first pixels.
+The macOS target is still a groundwork milestone, not a full simulator yet. It now validates portable SDK headers, runtime path split, scenario startup, a native bootstrap simulation loop, and Metal-backed scene rendering for one real scenario.
 The macOS `mise` tasks reconfigure with `cmake --fresh` so stale `_deps` state from older build graphs does not survive between runs.
 The legacy `meshc` utility is not part of the macOS/bootstrap build yet because it still depends on Direct3D 7 headers.
 The bootstrap launcher now resolves `Scenarios/` and the other copied runtime assets from the build root next to `Orbiter.app`, not from `Orbiter.app/Contents/MacOS`.
-`Orbiter_server` is still a bootstrap validation executable and exits after printing its resolved launch state. `Orbiter_macOS` now stays open until you close it unless you explicitly pass `--maxframes=...`.
-The current visual milestone is the stock DeltaGlider Mk4 mesh rendered from the copied `Meshes/DG` and `Textures/DG` assets. Full scenario-driven scene rendering is still future work.
-The Metal path now renders opaque and transparent vessel submeshes separately, with back-face culling enabled, to reduce flicker on thin glass-like polygons.
+`Orbiter_server` now steps the native bootstrap session for a fixed frame count and reports focus vessel state at exit. `Orbiter_macOS` stays open until you close it unless you explicitly pass `--maxframes=...`.
+The current native scenario milestone is `Scenarios/Quadcopter/Quadcopter at KSC.scn`, rendered from copied Quadcopter/KSC mesh assets and a shared bootstrap session layer.
+The Metal path renders opaque and transparent submeshes separately, with back-face culling enabled, and now consumes a scenario-backed camera/object scene instead of a hardwired demo vessel.
+The repository still does not ship Earth terrain/elevation tile archives, so the native bootstrap scene currently uses a procedural KSC ground fallback even though the base meshes/primitives and vessel are scenario-driven.
 
 If you want to build the documentation, you need a few additional tools:
 - a filter to convert ODT and DOC sources to PDF, such as
