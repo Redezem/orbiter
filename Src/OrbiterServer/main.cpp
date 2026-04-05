@@ -1,36 +1,35 @@
 // Copyright (c) Martin Schweiger
 // Licensed under the MIT License
 
-#include "Bootstrap.h"
-#include "SimulationSession.h"
+#include "Runtime.h"
 
 #include <iostream>
 
 int main(int argc, char **argv)
 {
-	const orbiter::bootstrap::LaunchOptions options = orbiter::bootstrap::parse_arguments(argc, argv);
+	const orbiter::runtime::LaunchOptions options = orbiter::runtime::parse_launch_options(argc, argv);
 	if (!options.error.empty()) {
 		std::cerr << options.error << '\n';
 		return 2;
 	}
 
 	if (options.show_help) {
-		std::cout << orbiter::bootstrap::help_text(argv[0]);
+		std::cout << orbiter::runtime::help_text(argv[0]);
 		return 0;
 	}
 
-	orbiter::bootstrap::SimulationSession session;
 	std::string error;
-	if (!session.initialize(options, error)) {
+	std::unique_ptr<orbiter::runtime::Session> session = orbiter::runtime::create_session(options, error);
+	if (!session) {
 		std::cerr << error << '\n';
 		return 3;
 	}
 
 	for (int frame = 0; frame < options.max_frames; ++frame) {
-		session.step(1.0 / 60.0, {});
+		session->step(1.0 / 60.0, {});
 	}
 
-	const orbiter::bootstrap::VesselState &focus = session.focus_vessel();
+	const orbiter::runtime::VesselState &focus = session->focus_vessel();
 
 	std::cout
 		<< "Orbiter_server session\n"
@@ -45,7 +44,7 @@ int main(int argc, char **argv)
 		<< "Rotation deg: " << focus.rotation_degrees.x << ' ' << focus.rotation_degrees.y << ' ' << focus.rotation_degrees.z << '\n'
 		<< "Throttle: " << focus.throttle << '\n';
 
-	for (const std::string &warning : session.warnings()) {
+	for (const std::string &warning : session->warnings()) {
 		std::cout << "Warning: " << warning << '\n';
 	}
 	return 0;

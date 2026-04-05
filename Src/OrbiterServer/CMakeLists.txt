@@ -7,13 +7,11 @@ add_executable(Orbiter_server
 
 target_include_directories(Orbiter_server
 	PRIVATE
-		${CMAKE_SOURCE_DIR}/Orbitersdk/include
-		${CMAKE_SOURCE_DIR}/Src/Bootstrap
-		${CMAKE_SOURCE_DIR}/Src/Platform
+		${CMAKE_SOURCE_DIR}/Src/Runtime
 )
 
 target_link_libraries(Orbiter_server
-	PRIVATE OrbiterBootstrap
+	PRIVATE OrbiterRuntime
 )
 
 add_dependencies(Orbiter_server CopyData)

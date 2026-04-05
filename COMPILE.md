@@ -4,7 +4,7 @@ PREREQUISITES
 Orbiter currently has two supported build tracks in this repository:
 
 - Legacy Win32 simulator build
-- Portable bootstrap/macOS groundwork build
+- Portable native-host/macOS groundwork build
 
 LEGACY WIN32 PREREQUISITES
 ==========================
@@ -93,13 +93,16 @@ Important notes:
 - The macOS preset is Apple Silicon (`arm64`) first.
 - The preset intentionally disables the legacy Win32 core, D3D9Client, GDIClient, XRSound, Windows-only utilities, and SDK sample add-ons.
 - The legacy `meshc` utility is also excluded on macOS for now because it still depends on Direct3D 7 headers.
-- `Orbiter_server` now loads `Scenarios/Quadcopter/Quadcopter at KSC.scn`, steps the native bootstrap session, and reports focus vessel state at exit.
-- `Orbiter_macOS` now loads the same scenario and renders the Quadcopter plus Cape Canaveral/KSC scene geometry through the shared bootstrap session layer. It is still not a full simulator port.
+- `Orbiter_server` and `Orbiter_macOS` now go through the shared runtime-owned session seam in `Src/Runtime`.
+- `Orbiter_server` now loads `Scenarios/Quadcopter/Quadcopter at KSC.scn`, steps the native bootstrap session backend, and reports focus vessel state at exit.
+- `Orbiter_macOS` now loads the same scenario and renders the Quadcopter plus Cape Canaveral/KSC scene geometry through the shared runtime/bootstrap session layer. It is still not a full simulator port.
 - The macOS `mise` tasks intentionally reconfigure with `cmake --fresh` so stale dependency state is discarded after CMake graph changes.
 - The bootstrap path resolves runtime assets such as `Scenarios/` from the build root next to `Orbiter.app`, so running the bundle binary directly works.
 - `CopyData` now also stages the Quadcopter mesh and the Earth base config needed for the native KSC scenario path.
 - `Orbiter_macOS` runs until the window is closed by default; use `--maxframes=<n>` if you want it to auto-exit.
+- Both native hosts accept `--backend=<bootstrap|orbiter-core>`. `bootstrap` is the default; `orbiter-core` currently fails fast with a fixed "not wired yet" error while the seam is being integrated.
 - The current Metal renderer separates transparent submeshes from opaque geometry, enables back-face culling, and consumes scenario-driven vessel/base/ground instances from the shared session.
+- When `ORBITER_MAKE_TESTS=ON` and `BUILD_ORBITER_SERVER=ON`, the native test surface now includes the `Runtime.Session` Catch2 target plus `Scenario.QuadcopterBootstrap` and `Scenario.OrbiterCoreStubFails`.
 - The repo still does not include Earth terrain/elevation archives, so the native KSC scene currently uses a procedural ground fallback instead of real planetary tiles.
   
   

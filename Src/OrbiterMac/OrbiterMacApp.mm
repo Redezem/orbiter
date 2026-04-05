@@ -2,7 +2,6 @@
 // Licensed under the MIT License
 
 #include "OrbiterMacApp.h"
-#include "SimulationSession.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_metal.h>
@@ -203,7 +202,7 @@ id<MTLTexture> create_solid_texture(id<MTLDevice> device, uint32_t rgba)
 	return texture;
 }
 
-matrix_float4x4 model_matrix_for_instance(const orbiter::bootstrap::MeshInstance &instance)
+matrix_float4x4 model_matrix_for_instance(const orbiter::runtime::MeshInstance &instance)
 {
 	const matrix_float4x4 translation = translation_matrix(
 		static_cast<float>(instance.position.x),
@@ -226,7 +225,7 @@ bool build_gpu_mesh_assets(
 	id<MTLDevice> device,
 	MTKTextureLoader *texture_loader,
 	const std::filesystem::path &textures_root,
-	const orbiter::bootstrap::FrameScene &scene,
+	const orbiter::runtime::FrameScene &scene,
 	std::vector<GpuMeshAsset> &gpu_assets,
 	std::string &error)
 {
@@ -235,7 +234,7 @@ bool build_gpu_mesh_assets(
 	gpu_assets.resize(scene.assets.size());
 
 	for (size_t asset_index = 0; asset_index < scene.assets.size(); ++asset_index) {
-		const orbiter::bootstrap::MeshAsset &asset = scene.assets[asset_index];
+		const orbiter::runtime::MeshAsset &asset = scene.assets[asset_index];
 		GpuMeshAsset &gpu_asset = gpu_assets[asset_index];
 		std::vector<ShaderVertex> gpu_vertices(asset.mesh.vertices.size());
 		for (size_t i = 0; i < asset.mesh.vertices.size(); ++i) {
@@ -271,7 +270,7 @@ bool build_gpu_mesh_assets(
 		gpu_asset.textures.resize(std::max<size_t>(asset.mesh.textures.size(), 1u), placeholder_texture);
 		for (size_t i = 0; i < asset.mesh.textures.size(); ++i) {
 			const std::filesystem::path texture_path =
-				orbiter::bootstrap::resolve_orbiter_asset_path(textures_root, asset.mesh.textures[i]);
+				orbiter::runtime::resolve_orbiter_asset_path(textures_root, asset.mesh.textures[i]);
 			if (texture_path.empty() || !std::filesystem::exists(texture_path)) {
 				continue;
 			}
@@ -297,12 +296,12 @@ bool build_gpu_mesh_assets(
 
 } // namespace
 
-int run_app(const orbiter::bootstrap::LaunchOptions &options)
+int run_app(const orbiter::runtime::LaunchOptions &options)
 {
 	@autoreleasepool {
-		orbiter::bootstrap::SimulationSession session;
 		std::string error;
-		if (!session.initialize(options, error)) {
+		std::unique_ptr<orbiter::runtime::Session> session = orbiter::runtime::create_session(options, error);
+		if (!session) {
 			std::cerr << error << '\n';
 			return 20;
 		}
@@ -434,7 +433,7 @@ int run_app(const orbiter::bootstrap::LaunchOptions &options)
 				device,
 				texture_loader,
 				options.content_root / "Textures",
-				session.frame_scene(),
+				session->frame_scene(),
 				gpu_assets,
 				error)) {
 			std::cerr << error << '\n';
@@ -458,7 +457,7 @@ int run_app(const orbiter::bootstrap::LaunchOptions &options)
 			<< "Content root: " << options.content_root << '\n'
 			<< "Scenario: " << options.scenario_path << '\n'
 			<< "User data: " << options.user_data_root << '\n';
-		for (const std::string &warning : session.warnings()) {
+		for (const std::string &warning : session->warnings()) {
 			std::cout << "Warning: " << warning << '\n';
 		}
 
@@ -472,7 +471,7 @@ int run_app(const orbiter::bootstrap::LaunchOptions &options)
 		uint64_t previous_ticks = SDL_GetTicks();
 
 		while (running && (options.max_frames == 0 || frames < options.max_frames)) {
-			orbiter::bootstrap::ControlInput input{};
+			orbiter::runtime::ControlInput input{};
 
 			SDL_Event event;
 			while (SDL_PollEvent(&event)) {
@@ -533,8 +532,8 @@ int run_app(const orbiter::bootstrap::LaunchOptions &options)
 			const uint64_t now_ticks = SDL_GetTicks();
 			const double dt = std::max(0.001, static_cast<double>(now_ticks - previous_ticks) / 1000.0);
 			previous_ticks = now_ticks;
-			session.step(dt, input);
-			const orbiter::bootstrap::FrameScene &scene = session.frame_scene();
+			session->step(dt, input);
+			const orbiter::runtime::FrameScene &scene = session->frame_scene();
 
 			int width = 0;
 			int height = 0;
@@ -585,18 +584,18 @@ int run_app(const orbiter::bootstrap::LaunchOptions &options)
 					(vector_float3){0.0f, 1.0f, 0.0f});
 				const matrix_float4x4 projection = perspective_matrix(fov, aspect, 0.1f, 30000.0f);
 
-				auto draw_instance = ^(const orbiter::bootstrap::MeshInstance &instance) {
+				auto draw_instance = ^(const orbiter::runtime::MeshInstance &instance) {
 					if (instance.asset_index >= scene.assets.size() || instance.asset_index >= gpu_assets.size()) {
 						return;
 					}
 
-					const orbiter::bootstrap::MeshAsset &asset = scene.assets[instance.asset_index];
+					const orbiter::runtime::MeshAsset &asset = scene.assets[instance.asset_index];
 					const GpuMeshAsset &gpu_asset = gpu_assets[instance.asset_index];
 					const matrix_float4x4 model = model_matrix_for_instance(instance);
 					const matrix_float4x4 mvp = matrix_multiply(projection, matrix_multiply(view, model));
 
 					[encoder setVertexBuffer:gpu_asset.vertex_buffer offset:0 atIndex:0];
-					for (const orbiter::bootstrap::MeshSubmesh &submesh : asset.mesh.submeshes) {
+					for (const orbiter::runtime::MeshSubmesh &submesh : asset.mesh.submeshes) {
 						FrameUniforms uniforms{};
 						uniforms.mvp = mvp;
 						uniforms.model = model;
@@ -608,7 +607,7 @@ int run_app(const orbiter::bootstrap::LaunchOptions &options)
 						};
 						if (submesh.material_index >= 0 &&
 							submesh.material_index < static_cast<int>(asset.mesh.materials.size())) {
-							const orbiter::bootstrap::MeshMaterial &material =
+							const orbiter::runtime::MeshMaterial &material =
 								asset.mesh.materials[static_cast<size_t>(submesh.material_index)];
 							uniforms.base_color.x *= material.diffuse[0];
 							uniforms.base_color.y *= material.diffuse[1];
@@ -636,13 +635,13 @@ int run_app(const orbiter::bootstrap::LaunchOptions &options)
 					}
 				};
 
-				for (const orbiter::bootstrap::TerrainPatch &patch : scene.terrain_patches) {
+				for (const orbiter::runtime::TerrainPatch &patch : scene.terrain_patches) {
 					draw_instance(patch.mesh);
 				}
-				for (const orbiter::bootstrap::BaseInstance &base : scene.base_instances) {
+				for (const orbiter::runtime::BaseInstance &base : scene.base_instances) {
 					draw_instance(base.mesh);
 				}
-				for (const orbiter::bootstrap::MeshInstance &vessel : scene.vessel_instances) {
+				for (const orbiter::runtime::MeshInstance &vessel : scene.vessel_instances) {
 					draw_instance(vessel);
 				}
 

@@ -16,32 +16,38 @@
   - portable bootstrap targets now run a constrained native scenario path: `Orbiter_server` and `Orbiter_macOS`
 - `Orbitersdk/include/OrbiterPlatform.h` is now the entry point for public platform typedefs and export macros.
 - The new portable runtime code lives in `Src/Platform`.
+- The new host-facing native session/runtime seam lives in `Src/Runtime`.
 - The new shared bootstrap code lives in `Src/Bootstrap`.
-- `Src/Bootstrap/SimulationSession.{h,cpp}` now owns the native single-scenario bootstrap path: scenario parsing, KSC base config parsing, a narrow Quadcopter flight model, camera state, and renderer-facing scene extraction.
-- `Src/Bootstrap/OrbiterMesh.{h,cpp}` is now the shared Orbiter `.msh` loader used by the bootstrap layer and the macOS host.
-- `Orbiter_server` now loads `Scenarios/Quadcopter/Quadcopter at KSC.scn`, steps the native bootstrap session, and reports focus vessel state at exit.
-- `Orbiter_macOS` now consumes the shared bootstrap scene instead of a hardwired DeltaGlider mesh and renders the Quadcopter plus KSC base meshes/primitives with a simulation-backed external camera.
+- `Src/Runtime/Runtime.{h,cpp}` now owns launch-option parsing, the runtime-owned scene/control/state contracts, backend selection, and the `Session` factory used by both native hosts.
+- `Src/Bootstrap/SimulationSession.{h,cpp}` now implements the runtime `Session` interface for the working bootstrap backend: scenario parsing, KSC base config parsing, a narrow Quadcopter flight model, camera state, and renderer-facing scene extraction.
+- `Src/Bootstrap/OrbiterMesh.{h,cpp}` is now the shared Orbiter `.msh` loader used by the bootstrap backend and produces runtime-owned mesh data.
+- `Orbiter_server` now creates its session through `Src/Runtime`, defaults to the `bootstrap` backend, and reports focus vessel state at exit.
+- `Orbiter_macOS` now creates its session through `Src/Runtime` instead of including bootstrap headers directly and still renders the Quadcopter plus KSC base meshes/primitives with a simulation-backed external camera.
 - macOS presets are `macos-arm64-debug` and `macos-arm64-release`.
 - Apple builds use the system `ZLIB` package instead of the vendored `zlib` fetch target.
 - The legacy `meshc` utility is excluded from the macOS/bootstrap build because it still depends on Direct3D 7 headers.
 - The bootstrap runtime now discovers a content root by walking upward until it finds `Scenarios/`, so the macOS app bundle resolves assets from the build root instead of `Contents/MacOS`.
 - `CopyData` now also stages the Quadcopter mesh and the Earth base config needed by the native KSC bootstrap path, in addition to the existing DeltaGlider staging.
 - The Metal renderer still draws opaque and transparent submeshes separately and uses back-face culling to reduce flicker on thin polygons, but it is now scene-driven rather than a one-mesh demo.
+- Native hosts now accept `--backend=<bootstrap|orbiter-core>`. `bootstrap` is the working default backend; `orbiter-core` is currently a fail-fast stub with the fixed error `Orbiter core backend is not wired yet`.
 - The repo still does not include Earth terrain/elevation tile archives, so the native KSC scene currently uses a procedural ground patch instead of true Orbiter terrain tiles.
+- `Tests/Runtime.Session.cpp` plus the `Scenario.QuadcopterBootstrap` and `Scenario.OrbiterCoreStubFails` CTest entries now provide native regression coverage for the runtime seam.
 - `TODO.md` now exists as the canonical parity backlog and should be updated whenever scope, blockers, or completed work changes.
 - `mise.toml` provides `configure-macos`, `build-macos`, `test-macos`, `run-macos`, `clean`, `install-macos`, and `uninstall-macos`, and the macOS tasks now use `cmake --fresh` to avoid stale build-graph state.
 
 ## Handoff
 
-- The repo is still at the first native scenario milestone on the bootstrap track: `Src/Bootstrap/SimulationSession.cpp` parses `Scenarios/Quadcopter/Quadcopter at KSC.scn`, extracts the focus/camera/ship state, parses `Config/Earth/Base/Canaveral.cfg`, builds a renderer-facing scene, and steps a narrow native Quadcopter flight model.
-- `Src/OrbiterServer/main.cpp` remains the headless regression target for that session. It loads the scenario, steps for `--maxframes`, and prints focus vessel position/velocity/rotation plus warnings at exit. A local Linux build of this path succeeded earlier in `/workspace/out/build/codex-dev`, and the resulting `Orbiter_server` run against the Quadcopter KSC scenario exited cleanly.
-- `Src/OrbiterMac/OrbiterMacApp.mm` consumes the shared `SimulationSession` scene instead of a hardwired `Meshes/DG/deltaglider.msh` path. A follow-up fix on 2026-04-03 corrected the Metal sampler descriptor enums to `MTLSamplerMinMagFilterLinear`, which was required for AppleClang/macOS builds after the scene-renderer rewrite.
-- The bootstrap implementation is still intentionally not the historical Orbiter runtime. The Quadcopter physics is a native bootstrap approximation, module loading is still not wired in, and the scene path is limited to one scenario/vessel class.
-- The biggest remaining functional gap is terrain. The repo does not ship the Earth surface/elevation archives, and the bootstrap scene therefore falls back to a procedural KSC ground plane. The next agent should not mistake the presence of KSC base geometry for full planetary-terrain support.
-- `TODO.md` is now the authoritative detailed checklist for everything left before native feature parity. The highest-value next steps remain: replace the bootstrap Quadcopter physics/session seam with real Orbiter runtime integration, implement true Earth terrain/elevation extraction once the tile archives are available at runtime, and then factor the growing Metal renderer/cache code out of `OrbiterMacApp.mm`.
+- The runtime/session seam has landed. `Src/Runtime/Runtime.h` now defines the host-facing contracts, `Src/Runtime/Runtime.cpp` owns option parsing and session creation, and both native hosts now depend on that layer instead of bootstrap headers.
+- The bootstrap path still remains the only working backend. `Src/Bootstrap/SimulationSession.cpp` still owns Quadcopter/KSC scenario parsing, KSC base extraction, procedural-ground scene construction, and the narrow native Quadcopter flight model, but it now sits behind the runtime `Session` interface.
+- The new `orbiter-core` backend is intentionally only a stub. It is selectable with `--backend=orbiter-core`, but `create_session` currently fails immediately with `Orbiter core backend is not wired yet`. The next agent should replace that stub rather than expanding bootstrap-only behavior first.
+- Native regression coverage now exists for the seam itself. A local Linux configure/build of the portable targets succeeded in `/workspace/out/build/codex-runtime`, and `ctest --test-dir out/build/codex-runtime -R 'Runtime.Session|Scenario\.'` passed before cleanup. The passing tests were `Runtime.Session`, `Scenario.QuadcopterBootstrap`, and `Scenario.OrbiterCoreStubFails`.
+- Terrain is still externally constrained. The repo does not ship Earth surface/elevation tile archives, so the KSC scene still falls back to a procedural ground patch. Terrain work remains important, but the highest-value next step is wiring a real historical-runtime backend into `Src/Runtime`.
+- `OrbiterMacApp.mm` is still a large renderer/cache hotspot, but it is no longer the critical-path blocker. The next agent should keep renderer extraction secondary to replacing the `orbiter-core` stub with the first real Orbiter backend implementation.
 
 ## Changelog
 
+- 2026-04-05: Added `Src/Runtime` as the native host/session seam, moved launch/session contracts out of bootstrap ownership, rewired `Orbiter_server` and `Orbiter_macOS` through that seam, added a selectable fail-fast `orbiter-core` stub backend, added native runtime regression coverage, and refreshed the contributor/docs handoff around the new boundary.
+- 2026-04-05: Reviewed the repo-owned Markdown roadmap/docs, documented the immediate next work chunk in `TODO.md`, and rewrote the handoff to prioritize introducing a reusable native runtime/session seam ahead of terrain or renderer follow-on work.
 - 2026-04-03: Added `TODO.md` as the canonical feature-parity backlog and updated contributor instructions to keep it current.
 - 2026-04-03: Fixed the macOS Metal sampler setup after the scene-renderer rewrite by using `MTLSamplerMinMagFilterLinear` for `MTLSamplerDescriptor::minFilter` and `magFilter`.
 - 2026-04-03: Added a shared bootstrap `SimulationSession` and `.msh` loader, staged Quadcopter/Earth base assets into the runtime tree, rewired `Orbiter_server` into a headless session runner, rewired `Orbiter_macOS` to render the Quadcopter KSC scene, and updated docs for the current procedural-ground limitation.

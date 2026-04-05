@@ -10,7 +10,9 @@ It should be updated whenever scope changes, work lands, or a dependency/blocker
 The repo is currently at a constrained native bootstrap milestone:
 
 - `Orbiter_server` and `Orbiter_macOS` can load `Scenarios/Quadcopter/Quadcopter at KSC.scn`
-- the bootstrap path has a shared `.msh` loader and a shared `SimulationSession`
+- the native hosts now go through a shared runtime-owned session seam in `Src/Runtime`
+- the bootstrap path still provides the only working backend through its shared `.msh` loader and `SimulationSession`
+- the `orbiter-core` backend now exists as an explicit fail-fast stub, proving backend selection without wiring the historical runtime yet
 - the macOS app renders the Quadcopter plus KSC base meshes/primitives with a simulation-backed external camera
 - the Quadcopter physics is still a native bootstrap approximation, not the historical Orbiter runtime
 - the repo still lacks Earth terrain/elevation archives, so the KSC scene uses a procedural ground fallback
@@ -224,7 +226,7 @@ These are the highest-priority dependency chains:
 
 ### 17. Testing And Regression Coverage
 
-- [ ] Add automated headless scenario smoke tests for the native runtime.
+- [x] Add automated headless scenario smoke tests for the native runtime.
 - [ ] Add tests for scenario parsing and base-config parsing.
 - [ ] Add tests for mesh loading edge cases.
 - [ ] Add golden or tolerance-based comparisons for simulation state where practical.
@@ -265,6 +267,22 @@ These are the highest-priority dependency chains:
 4. Factor the renderer out of `OrbiterMacApp.mm`.
 5. Expand content breadth from Quadcopter/KSC to representative stock scenarios and vessels.
 6. Close the remaining user-facing gaps: HUD/MFD/cockpit/UI/input/sound.
+
+## Immediate Next Work Chunk
+
+The runtime/session seam now exists, so the next bounded engineering slice should replace the `orbiter-core` stub with the first real historical-runtime integration behind that seam:
+
+- [ ] Add a real `orbiter-core` backend implementation to `Src/Runtime` instead of the current fail-fast stub.
+- [ ] Map the runtime-owned `Session` contract onto historical Orbiter startup, frame stepping, scene extraction, and diagnostics without breaking the working bootstrap backend.
+- [ ] Bring one real scenario/object-lifecycle path online behind `orbiter-core`, even if it is still narrower than the full legacy runtime surface.
+- [ ] Keep the Quadcopter/KSC bootstrap backend as the regression control while the new backend comes online.
+- [ ] Extend native regression coverage so bootstrap success and orbiter-core progress can be compared without manual inspection.
+
+This is the right next chunk because the seam work is now complete enough to support it:
+
+- terrain work is still partially blocked by missing Earth tile archives
+- renderer refactoring is still valuable, but it no longer sits on the critical path
+- the highest-value technical risk is now proving that the historical Orbiter runtime can live behind the new session contract
 
 ## Notes
 

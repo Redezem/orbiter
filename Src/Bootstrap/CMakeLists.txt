@@ -2,15 +2,14 @@
 # Licensed under the MIT License
 
 add_library(OrbiterBootstrap STATIC
-	Bootstrap.cpp
 	OrbiterMesh.cpp
 	SimulationSession.cpp
 )
 
 target_include_directories(OrbiterBootstrap
 	PUBLIC
-		${CMAKE_SOURCE_DIR}/Orbitersdk/include
 		${CMAKE_CURRENT_SOURCE_DIR}
+		${CMAKE_SOURCE_DIR}/Src/Runtime
 )
 
 target_link_libraries(OrbiterBootstrap

@@ -18,7 +18,7 @@ spare time.
 This repository now contains two active build tracks:
 
 - The legacy Win32 simulator path, which still carries the full historical Orbiter implementation.
-- A new portable bootstrap path for macOS groundwork, built around `Orbiter_server` and `Orbiter_macOS`.
+- A new portable native-host path for macOS groundwork, built around `Orbiter_server` and `Orbiter_macOS`.
 
 The macOS track is still early-stage, but it has moved past first-pixels bring-up. It now focuses on a native single-scenario bootstrap path around the Quadcopter KSC scene rather than full simulator parity.
 
@@ -73,8 +73,8 @@ The legacy Windows path still carries historical Win32 assumptions and Windows-o
 
 The repository now includes an Apple Silicon macOS bootstrap path:
 
-- `Orbiter_server`: a portable headless session runner that loads the Quadcopter KSC scenario, steps native bootstrap physics, and reports focus state.
-- `Orbiter_macOS`: an SDL3/Metal app bundle that opens a native window, loads the same scenario, and renders the Quadcopter plus Cape Canaveral/KSC scene geometry.
+- `Orbiter_server`: a portable headless session runner that goes through the shared native runtime/session seam, loads the Quadcopter KSC scenario, steps native bootstrap physics, and reports focus state.
+- `Orbiter_macOS`: an SDL3/Metal app bundle that uses the same runtime/session seam, opens a native window, and renders the Quadcopter plus Cape Canaveral/KSC scene geometry.
 
 Current macOS prerequisites:
 
@@ -97,13 +97,15 @@ mise run build-macos
 mise run run-macos
 ```
 
-The macOS target is still a groundwork milestone, not a full simulator yet. It now validates portable SDK headers, runtime path split, scenario startup, a native bootstrap simulation loop, and Metal-backed scene rendering for one real scenario.
+The macOS target is still a groundwork milestone, not a full simulator yet. It now validates portable SDK headers, runtime path split, a runtime-owned session seam under `Src/Runtime`, scenario startup, a native bootstrap simulation loop, and Metal-backed scene rendering for one real scenario.
 The macOS `mise` tasks reconfigure with `cmake --fresh` so stale `_deps` state from older build graphs does not survive between runs.
 The legacy `meshc` utility is not part of the macOS/bootstrap build yet because it still depends on Direct3D 7 headers.
-The bootstrap launcher now resolves `Scenarios/` and the other copied runtime assets from the build root next to `Orbiter.app`, not from `Orbiter.app/Contents/MacOS`.
-`Orbiter_server` now steps the native bootstrap session for a fixed frame count and reports focus vessel state at exit. `Orbiter_macOS` stays open until you close it unless you explicitly pass `--maxframes=...`.
-The current native scenario milestone is `Scenarios/Quadcopter/Quadcopter at KSC.scn`, rendered from copied Quadcopter/KSC mesh assets and a shared bootstrap session layer.
+The runtime launcher now resolves `Scenarios/` and the other copied runtime assets from the build root next to `Orbiter.app`, not from `Orbiter.app/Contents/MacOS`.
+`Orbiter_server` now steps the native session for a fixed frame count and reports focus vessel state at exit. `Orbiter_macOS` stays open until you close it unless you explicitly pass `--maxframes=...`.
+Both native hosts now accept `--backend=<bootstrap|orbiter-core>`. `bootstrap` is the default backend; `orbiter-core` is a fail-fast stub that exists to hold the seam for the historical runtime integration work.
+The current native scenario milestone is `Scenarios/Quadcopter/Quadcopter at KSC.scn`, rendered from copied Quadcopter/KSC mesh assets and the shared runtime/bootstrap session layer.
 The Metal path renders opaque and transparent submeshes separately, with back-face culling enabled, and now consumes a scenario-backed camera/object scene instead of a hardwired demo vessel.
+When native tests are enabled, the repo now includes a runtime seam unit test plus `Orbiter_server` smoke coverage for both the working bootstrap backend and the expected `orbiter-core` stub failure path.
 The repository still does not ship Earth terrain/elevation tile archives, so the native bootstrap scene currently uses a procedural KSC ground fallback even though the base meshes/primitives and vessel are scenario-driven.
 
 If you want to build the documentation, you need a few additional tools:

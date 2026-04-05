@@ -11,6 +11,7 @@ Groundwork completed in-repo so far:
 - Added `Orbitersdk/include/OrbiterPlatform.h` so public SDK headers no longer directly include `windows.h`.
 - Updated the common SDK headers to compile on non-Windows hosts with Orbiter-owned type aliases.
 - Added a portable runtime layer for shared-library loading and user-data path selection under `Src/Platform`.
+- Added a runtime-owned native session seam under `Src/Runtime` so the native hosts no longer instantiate bootstrap session code directly.
 - Added a portable bootstrap library under `Src/Bootstrap`.
 - Added `Orbiter_server` as a renderer-free session executable that now loads the Quadcopter KSC scenario, steps a native bootstrap simulation loop, and reports focus vessel state.
 - Added `Orbiter_macOS` scaffolding as an SDL3/Metal app bundle for first-pixels bring-up on Apple Silicon.
@@ -22,10 +23,12 @@ Groundwork completed in-repo so far:
 - Added a shared Orbiter `.msh` reader, a native bootstrap `SimulationSession`, and a Metal draw path that now renders the Quadcopter KSC scenario instead of a hardwired demo vessel.
 - Split the Metal draw path into opaque and transparent passes and enabled back-face culling to reduce flicker on thin transparent polygons such as canopy/HUD surfaces.
 - Added a native KSC scene extraction path that stages the Quadcopter mesh and Earth base config into the runtime tree, parses `Canaveral.cfg`, renders KSC base meshes/primitives, and uses a procedural ground fallback when planetary tile archives are absent.
+- Added runtime backend selection (`--backend=<bootstrap|orbiter-core>`), kept `bootstrap` as the default backend, and introduced a fail-fast `orbiter-core` stub so the real Orbiter integration now has a concrete seam to replace.
+- Added native regression coverage for that seam with a Catch2 `Runtime.Session` target and `Orbiter_server` smoke tests for the bootstrap-success and orbiter-core-stub-failure paths.
 
 What is still intentionally incomplete:
 
-- The full Orbiter simulation core is still not wired into the portable bootstrap targets.
+- The full Orbiter simulation core is still not wired into the new `orbiter-core` backend behind the native session seam.
 - The current native session is intentionally narrow: one flyable vessel (`Quadcopter`), one scenario (`Quadcopter at KSC`), one external camera mode, and a native bootstrap physics model rather than the historical Orbiter vessel/module runtime.
 - The repo still does not ship Earth terrain/elevation tile archives, so the current KSC scene uses a procedural ground patch instead of true Orbiter terrain tiles.
 - Legacy Win32 UI, modules, and renderer code still exist and remain the primary full-feature path.
@@ -33,14 +36,14 @@ What is still intentionally incomplete:
 ### Where We Are Now
 
 - `mise run build-macos` is able to configure and build the current Apple Silicon bootstrap path.
-- `Orbiter_server` now proves the portable launch/bootstrap path, resolves the content root correctly, loads the Quadcopter KSC scenario, and steps the native bootstrap session to completion.
-- `Orbiter_macOS` now opens a native SDL3/Metal window, stays open by default, resolves runtime assets from the build root, and renders a scenario-backed scene consisting of the Quadcopter, KSC base geometry, and procedural ground.
+- `Orbiter_server` now proves the portable launch/runtime path, resolves the content root correctly, selects a backend through `Src/Runtime`, loads the Quadcopter KSC scenario on the bootstrap backend, and fails cleanly on the `orbiter-core` stub backend.
+- `Orbiter_macOS` now opens a native SDL3/Metal window, stays open by default, resolves runtime assets from the build root, and renders a scenario-backed scene consisting of the Quadcopter, KSC base geometry, and procedural ground through the same runtime/session seam.
 - The bootstrap renderer has a depth buffer, a basic lit textured mesh path, separate opaque/transparent handling, and consumes shared scene data from `SimulationSession`.
-- The current macOS result is therefore no longer just "first textured vessel"; it is "first native scenario-backed scene and bootstrap flight loop" for one constrained scenario.
+- The current macOS result is therefore no longer just "first textured vessel"; it is "first native scenario-backed scene and runtime-owned host/session seam" for one constrained scenario.
 
 ### Recommended Next Steps
 
-1. Replace the bootstrap Quadcopter physics model with a reusable simulation seam into the real Orbiter runtime instead of maintaining a parallel flight model.
+1. Replace the fail-fast `orbiter-core` stub behind `Src/Runtime` with the first real Orbiter runtime/backend integration, using the bootstrap backend as the control path while the historical core is brought online.
 2. Implement actual Earth terrain/elevation extraction for the KSC scene once the required tile archives are available at runtime, then remove the procedural ground fallback.
 3. Move Metal asset/cache/render code out of `OrbiterMacApp.mm` into a reusable renderer layer so the app file stops being the rendering hot spot.
 4. Broaden the native session beyond one vessel/scenario after the real simulation seam exists, starting with scenario loading breadth and then DeltaGlider/cockpit/UI follow-on work.

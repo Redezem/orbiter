@@ -3,6 +3,7 @@
 
 add_subdirectory(Platform)
 add_subdirectory(Bootstrap)
+add_subdirectory(Runtime)
 
 if(BUILD_ORBITER_SERVER)
 	add_subdirectory(OrbiterServer)

@@ -1,21 +1,20 @@
 // Copyright (c) Martin Schweiger
 // Licensed under the MIT License
 
-#include "Bootstrap.h"
 #include "OrbiterMacApp.h"
 #include <filesystem>
 #include <iostream>
 
 int main(int argc, char **argv)
 {
-	orbiter::bootstrap::LaunchOptions options = orbiter::bootstrap::parse_arguments(argc, argv);
+	orbiter::runtime::LaunchOptions options = orbiter::runtime::parse_launch_options(argc, argv);
 	if (!options.error.empty()) {
 		std::cerr << options.error << '\n';
 		return 2;
 	}
 
 	if (options.show_help) {
-		std::cout << orbiter::bootstrap::help_text(argv[0]);
+		std::cout << orbiter::runtime::help_text(argv[0]);
 		return 0;
 	}
 

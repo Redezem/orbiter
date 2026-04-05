@@ -59,58 +59,6 @@ bool starts_with_ci(std::string_view value, std::string_view prefix)
 	return true;
 }
 
-std::string lowercase(std::string_view value)
-{
-	std::string out(value);
-	std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
-		return static_cast<char>(std::tolower(c));
-	});
-	return out;
-}
-
-std::filesystem::path resolve_case_insensitive(
-	const std::filesystem::path &root,
-	const std::vector<std::string> &components)
-{
-	std::filesystem::path current = root;
-	for (const std::string &component : components) {
-		if (!std::filesystem::exists(current) || !std::filesystem::is_directory(current)) {
-			return {};
-		}
-
-		const std::string wanted = lowercase(component);
-		bool matched = false;
-		for (const auto &entry : std::filesystem::directory_iterator(current)) {
-			if (lowercase(entry.path().filename().string()) == wanted) {
-				current /= entry.path().filename();
-				matched = true;
-				break;
-			}
-		}
-
-		if (!matched) {
-			return {};
-		}
-	}
-
-	return current;
-}
-
-std::vector<std::string> split_orbiter_path(std::string value)
-{
-	std::replace(value.begin(), value.end(), '\\', '/');
-	std::vector<std::string> parts;
-	std::stringstream stream(value);
-	std::string part;
-	while (std::getline(stream, part, '/')) {
-		part = trim(part);
-		if (!part.empty()) {
-			parts.push_back(part);
-		}
-	}
-	return parts;
-}
-
 bool parse_group(
 	std::istream &stream,
 	const std::string &header_line,
@@ -191,31 +139,6 @@ bool parse_group(
 }
 
 } // namespace
-
-std::filesystem::path resolve_orbiter_asset_path(
-	const std::filesystem::path &root,
-	const std::string &orbiter_relative_path)
-{
-	if (orbiter_relative_path.empty()) {
-		return {};
-	}
-
-	const std::vector<std::string> parts = split_orbiter_path(orbiter_relative_path);
-	if (parts.empty()) {
-		return {};
-	}
-
-	const std::filesystem::path resolved = resolve_case_insensitive(root, parts);
-	if (!resolved.empty()) {
-		return resolved;
-	}
-
-	std::filesystem::path direct = root;
-	for (const std::string &part : parts) {
-		direct /= part;
-	}
-	return direct;
-}
 
 bool load_orbiter_mesh(
 	const std::filesystem::path &mesh_path,

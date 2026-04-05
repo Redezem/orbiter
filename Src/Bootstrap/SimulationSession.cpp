@@ -14,6 +14,21 @@
 
 namespace orbiter::bootstrap {
 
+using runtime::BaseInstance;
+using runtime::Color4;
+using runtime::ControlInput;
+using runtime::FrameScene;
+using runtime::LaunchOptions;
+using runtime::LoadedMesh;
+using runtime::MeshAsset;
+using runtime::MeshInstance;
+using runtime::MeshMaterial;
+using runtime::MeshSubmesh;
+using runtime::MeshVertex;
+using runtime::TerrainPatch;
+using runtime::Vector3;
+using runtime::VesselState;
+
 namespace {
 
 constexpr double kEarthRadius = 6378137.0;
@@ -569,7 +584,7 @@ bool register_mesh_asset(
 	}
 
 	const std::filesystem::path mesh_path =
-		resolve_orbiter_asset_path(content_root / "Meshes", mesh_name + ".msh");
+		runtime::resolve_orbiter_asset_path(content_root / "Meshes", mesh_name + ".msh");
 	LoadedMesh mesh;
 	if (!load_orbiter_mesh(mesh_path, mesh, error)) {
 		return false;

@@ -22,13 +22,12 @@ add_executable(Orbiter_macOS MACOSX_BUNDLE
 
 target_include_directories(Orbiter_macOS
 	PRIVATE
-		${CMAKE_SOURCE_DIR}/Orbitersdk/include
-		${CMAKE_SOURCE_DIR}/Src/Bootstrap
+		${CMAKE_SOURCE_DIR}/Src/Runtime
 )
 
 target_link_libraries(Orbiter_macOS
 	PRIVATE
-		OrbiterBootstrap
+		OrbiterRuntime
 		SDL3::SDL3
 		${FOUNDATION_FRAMEWORK}
 		${METAL_FRAMEWORK}

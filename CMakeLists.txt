@@ -251,13 +251,13 @@ option(
 
 option(
 	BUILD_ORBITER_SERVER
-	"Build the portable Orbiter_server bootstrap target"
+	"Build the portable Orbiter_server native host target"
 	${ORBITER_DEFAULT_BUILD_SERVER}
 )
 
 option(
 	ORBITER_BUILD_MACOS_APP
-	"Build the native macOS SDL3/Metal bootstrap target"
+	"Build the native macOS SDL3/Metal native host target"
 	${ORBITER_DEFAULT_BUILD_MACOS_APP}
 )
 
