@@ -42,7 +42,7 @@ constexpr double kQuadcopterMaxThrustNewton = 30.0;
 constexpr double kMaxTiltRadians = 25.0 * kDegreesToRadians;
 constexpr double kMaxYawRate = 1.4;
 constexpr double kGroundPlaneExtent = 8000.0;
-constexpr int kTerrainPatchLevel = 11;
+constexpr int kTerrainPatchLevel = 13;
 constexpr int kTerrainPatchesPerSide = 3;
 constexpr int kTerrainSamplesPerSide = 256; // 256^2 vertices fits uint16 index range
 
