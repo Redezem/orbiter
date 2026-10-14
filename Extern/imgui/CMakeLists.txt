@@ -11,6 +11,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(imgui)
 
+# Stage UI fonts into the build tree so the runtime Fonts/ directory is
+# complete without a separate install step (upstream only installs them).
+file(COPY
+	${imgui_SOURCE_DIR}/misc/fonts/Roboto-Medium.ttf
+	${imgui_SOURCE_DIR}/misc/fonts/Cousine-Regular.ttf
+	DESTINATION ${ORBITER_BINARY_ROOT_DIR}/Fonts
+)
+
 install(FILES ${imgui_SOURCE_DIR}/misc/fonts/Roboto-Medium.ttf fa-solid-900.ttf ${imgui_SOURCE_DIR}/misc/fonts/Cousine-Regular.ttf Lekton-Bold.ttf architext.regular.ttf
 	DESTINATION ${ORBITER_INSTALL_ROOT_DIR}/Fonts
 )
