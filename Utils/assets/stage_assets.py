@@ -67,6 +67,8 @@ def category_score(target, cand):
     if "menuinfobar/" in t and c.startswith("src/plugin/"): s += 18
     # Lua sample scenarios ship in the SDK samples tree
     if t.startswith("scenarios/lua/") and c.startswith("orbitersdk/samples/lua/"): s += 18
+    # vessel thumbnails for the vessel-selection UI live in per-vessel Thumbnail dirs
+    if t.startswith("images/vessels/") and "/thumbnail/" in c: s += 18
     if "/thumbnail/" in c: s -= 5
     if "/help/" in c: s -= 5
     if c.startswith("orbitersdk/"): s -= 8
