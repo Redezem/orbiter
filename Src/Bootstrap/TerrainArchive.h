@@ -126,6 +126,10 @@ struct TerrainMeshOptions {
 	double vertical_exaggeration = 1.0;
 	double reference_elevation = 0.0;      // subtracted from samples when enabled
 	bool use_reference_elevation = false;  // local relief, not geoid height
+	double uv_offset_u = 0.0;              // added to generated u (sub-rect of a shared texture)
+	double uv_offset_v = 0.0;              // added to generated v
+	double uv_scale_u = 1.0;               // generated u spans [offset, offset+scale]
+	double uv_scale_v = 1.0;               // generated v spans [offset, offset+scale]
 };
 
 bool build_terrain_mesh(

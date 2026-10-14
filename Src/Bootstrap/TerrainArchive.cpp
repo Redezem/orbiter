@@ -568,8 +568,8 @@ bool build_terrain_mesh(
 	for (int row = 0; row < samples; ++row) {
 		for (int col = 0; col < samples; ++col) {
 			const size_t o = (static_cast<size_t>(row) * samples + col) * 2;
-			uvs[o + 0] = static_cast<float>(static_cast<double>(col) / (samples - 1));
-			uvs[o + 1] = static_cast<float>(1.0 - static_cast<double>(row) / (samples - 1));
+			uvs[o + 0] = static_cast<float>(options.uv_offset_u + options.uv_scale_u * static_cast<double>(col) / (samples - 1));
+			uvs[o + 1] = static_cast<float>(options.uv_offset_v + options.uv_scale_v * (1.0 - static_cast<double>(row) / (samples - 1)));
 		}
 	}
 

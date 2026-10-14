@@ -43,6 +43,7 @@ constexpr double kMaxTiltRadians = 25.0 * kDegreesToRadians;
 constexpr double kMaxYawRate = 1.4;
 constexpr double kGroundPlaneExtent = 8000.0;
 constexpr int kTerrainPatchLevel = 13;
+constexpr int kTerrainSurfaceLevel = 14; // Surf.tree carries P14 tiles near KSC
 constexpr int kTerrainPatchesPerSide = 3;
 constexpr int kTerrainSamplesPerSide = 256; // 256^2 vertices fits uint16 index range
 
@@ -794,138 +795,165 @@ bool SimulationSession::initialize(const LaunchOptions &options, std::string &er
 			const int patches_per_side = (ilat_max - ilat_min + 1);
 
 			const double pi = 3.14159265358979323846;
-			const double min_lat_radians = (0.5 - double(ilat_max + 1) / nlat) * pi;
-			const double max_lat_radians = (0.5 - double(ilat_min) / nlat) * pi;
-			const double min_lng_radians = double(ilng_min) / nlng * 2.0 * pi - pi;
-			const double max_lng_radians = double(ilng_max + 1) / nlng * 2.0 * pi - pi;
 
 			double reference_elevation = 0.0;
 			elev_archive.sample_elevation(base_lat_radians, base_lng_radians, kTerrainPatchLevel, reference_elevation);
 
-			TerrainMeshOptions mesh_options;
-			mesh_options.samples_per_side = kTerrainSamplesPerSide;
-			mesh_options.patch_level = kTerrainPatchLevel;
-			mesh_options.min_latitude_degrees = min_lat_radians * kRadiansToDegrees;
-			mesh_options.max_latitude_degrees = max_lat_radians * kRadiansToDegrees;
-			mesh_options.min_longitude_degrees = min_lng_radians * kRadiansToDegrees;
-			mesh_options.max_longitude_degrees = max_lng_radians * kRadiansToDegrees;
-			mesh_options.reference_elevation = reference_elevation;
-			mesh_options.use_reference_elevation = true;
-
-			std::vector<float> positions, normals, uvs;
-			std::vector<uint16_t> indices;
-			if (build_terrain_mesh(elev_archive, mesh_options, positions, normals, uvs, indices, terrain_error)) {
-				LoadedMesh terrain_mesh;
-				const size_t vertex_count = positions.size() / 3;
-				terrain_mesh.vertices.reserve(vertex_count);
-				for (size_t i = 0; i < vertex_count; ++i) {
-					terrain_mesh.vertices.push_back({
-						{positions[i * 3 + 0], positions[i * 3 + 1], positions[i * 3 + 2]},
-						{normals[i * 3 + 0], normals[i * 3 + 1], normals[i * 3 + 2]},
-						{uvs[i * 2 + 0], uvs[i * 2 + 1]},
-					});
-				}
-				terrain_mesh.indices = std::move(indices);
-				terrain_mesh.submeshes.push_back({
-					0,
-					static_cast<uint32_t>(terrain_mesh.indices.size()),
-					-1,
-					0,
-					false,
-				});
-
-				// Stitch the matching surface tiles into a PNG texture so the
-				// Metal texture loader can consume it (it cannot read DDS).
-				const std::filesystem::path surf_archive_path =
-					elev_archive_path.parent_path() / "Surf.tree";
-				std::string texture_relative;
-				TerrainArchive surf_archive;
-				std::string surf_error;
-				if (std::filesystem::exists(surf_archive_path) && surf_archive.open(surf_archive_path, surf_error)) {
-					// Surface archives do not carry every patch level everywhere
-					// (ocean tiles are absent near KSC). Load each tile at the
-					// finest available level, like the legacy ZTreeMgr does.
-					std::vector<TerrainSurfaceTile> surf_tiles;
-					bool all_tiles = true;
-					for (int tile_ilat = ilat_min; tile_ilat <= ilat_max && all_tiles; ++tile_ilat) {
-						for (int tile_ilng = ilng_min; tile_ilng <= ilng_max; ++tile_ilng) {
-							TerrainSurfaceTile tile;
-							bool loaded = false;
-							for (int level = kTerrainPatchLevel; level >= 8 && !loaded; --level) {
-								const int shift = kTerrainPatchLevel - level;
-								const int parent_ilat = tile_ilat >> shift;
-								const int parent_ilng = tile_ilng >> shift;
-								if (surf_archive.load_surface_tile(level, parent_ilat, parent_ilng, tile, surf_error)) {
-									loaded = true;
-								}
+			// Stitch the P14 surface tiles into one PNG texture so the Metal
+			// texture loader can consume it (it cannot read DDS). Each P13
+			// tile mesh samples its own sub-rect of this shared texture.
+			std::string texture_relative;
+			const std::filesystem::path surf_archive_path =
+				elev_archive_path.parent_path() / "Surf.tree";
+			TerrainArchive surf_archive;
+			std::string surf_error;
+			if (std::filesystem::exists(surf_archive_path) && surf_archive.open(surf_archive_path, surf_error)) {
+				// Surface archives do not carry every patch level everywhere
+				// (ocean tiles are absent near KSC). Load each tile at the
+				// finest available level, like the legacy ZTreeMgr does.
+				std::vector<TerrainSurfaceTile> surf_tiles;
+				bool all_tiles = true;
+				const int surf_shift = kTerrainSurfaceLevel - kTerrainPatchLevel;
+				const int surf_ilat_min = ilat_min << surf_shift;
+				const int surf_ilat_max = ((ilat_max + 1) << surf_shift) - 1;
+				const int surf_ilng_min = ilng_min << surf_shift;
+				const int surf_ilng_max = ((ilng_max + 1) << surf_shift) - 1;
+				const int surf_per_side = surf_ilat_max - surf_ilat_min + 1;
+				for (int tile_ilat = surf_ilat_min; tile_ilat <= surf_ilat_max && all_tiles; ++tile_ilat) {
+					for (int tile_ilng = surf_ilng_min; tile_ilng <= surf_ilng_max && all_tiles; ++tile_ilng) {
+						TerrainSurfaceTile tile;
+						bool loaded = false;
+						for (int level = kTerrainSurfaceLevel; level >= 8 && !loaded; --level) {
+							const int shift = kTerrainSurfaceLevel - level;
+							const int parent_ilat = tile_ilat >> shift;
+							const int parent_ilng = tile_ilng >> shift;
+							if (surf_archive.load_surface_tile(level, parent_ilat, parent_ilng, tile, surf_error)) {
+								loaded = true;
 							}
-							if (!loaded) {
-								all_tiles = false;
-								break;
-							}
-							surf_tiles.push_back(std::move(tile));
 						}
+						if (!loaded) {
+							all_tiles = false;
+							break;
+						}
+						surf_tiles.push_back(std::move(tile));
 					}
-					if (all_tiles) {
-						std::vector<uint8_t> rgba;
-						int image_width = 0, image_height = 0;
-						if (stitch_surface_tiles(surf_tiles, patches_per_side, rgba, image_width, image_height, surf_error)) {
-							const std::filesystem::path generated_dir =
-								options.content_root / "Textures" / "Earth" / "Generated";
-							std::filesystem::create_directories(generated_dir);
-							const std::string image_name =
-								"Surf_P" + std::to_string(kTerrainPatchLevel) + "_" +
-								std::to_string(ilat_min) + "_" + std::to_string(ilng_min) + ".png";
-							const std::filesystem::path image_path = generated_dir / image_name;
-							if (write_png_rgba(image_path, image_width, image_height, rgba.data(), surf_error)) {
-								texture_relative = "Earth/Generated/" + image_name;
-							} else {
-								warnings_.push_back("Terrain surface PNG generation failed: " + surf_error);
-							}
+				}
+				if (all_tiles) {
+					std::vector<uint8_t> rgba;
+					int image_width = 0, image_height = 0;
+					if (stitch_surface_tiles(surf_tiles, surf_per_side, rgba, image_width, image_height, surf_error)) {
+						const std::filesystem::path generated_dir =
+							options.content_root / "Textures" / "Earth" / "Generated";
+						std::filesystem::create_directories(generated_dir);
+						const std::string image_name =
+							"Surf_P" + std::to_string(kTerrainSurfaceLevel) + "_" +
+							std::to_string(ilat_min) + "_" + std::to_string(ilng_min) + ".png";
+						const std::filesystem::path image_path = generated_dir / image_name;
+						if (write_png_rgba(image_path, image_width, image_height, rgba.data(), surf_error)) {
+							texture_relative = "Earth/Generated/" + image_name;
 						} else {
-							warnings_.push_back("Terrain surface stitching failed: " + surf_error);
+							warnings_.push_back("Terrain surface PNG generation failed: " + surf_error);
 						}
 					} else {
-						warnings_.push_back("Terrain surface tiles unavailable: " + surf_error);
+						warnings_.push_back("Terrain surface stitching failed: " + surf_error);
 					}
 				} else {
-					warnings_.push_back("Earth surface archive unavailable: " + surf_archive_path.string());
+					warnings_.push_back("Terrain surface tiles unavailable: " + surf_error);
 				}
+			} else {
+				warnings_.push_back("Earth surface archive unavailable: " + surf_archive_path.string());
+			}
 
-				if (!texture_relative.empty()) {
-					terrain_mesh.textures.push_back(texture_relative);
-				}
+			// Build one mesh per P13 tile: 256 samples across a ~4.9 km tile is
+			// ~19 m vertex spacing, versus ~57 m for one 256-sample mesh across
+			// the whole 3x3 region.
+			bool meshes_ok = true;
+			const double tile_uv_span = 1.0 / patches_per_side;
+			for (int tile_ilat = ilat_min; tile_ilat <= ilat_max && meshes_ok; ++tile_ilat) {
+				for (int tile_ilng = ilng_min; tile_ilng <= ilng_max && meshes_ok; ++tile_ilng) {
+					const double tile_min_lat_radians = (0.5 - double(tile_ilat + 1) / nlat) * pi;
+					const double tile_max_lat_radians = (0.5 - double(tile_ilat) / nlat) * pi;
+					const double tile_min_lng_radians = double(tile_ilng) / nlng * 2.0 * pi - pi;
+					const double tile_max_lng_radians = double(tile_ilng + 1) / nlng * 2.0 * pi - pi;
 
-				const size_t terrain_asset_index = register_generated_asset(
-					"terrain:earth:p" + std::to_string(kTerrainPatchLevel),
-					std::move(terrain_mesh),
-					asset_lookup,
-					frame_scene_.assets);
+					TerrainMeshOptions tile_options;
+					tile_options.samples_per_side = kTerrainSamplesPerSide;
+					tile_options.patch_level = kTerrainPatchLevel;
+					tile_options.min_latitude_degrees = tile_min_lat_radians * kRadiansToDegrees;
+					tile_options.max_latitude_degrees = tile_max_lat_radians * kRadiansToDegrees;
+					tile_options.min_longitude_degrees = tile_min_lng_radians * kRadiansToDegrees;
+					tile_options.max_longitude_degrees = tile_max_lng_radians * kRadiansToDegrees;
+					tile_options.reference_elevation = reference_elevation;
+					tile_options.use_reference_elevation = true;
+					const int tile_row = tile_ilat - ilat_min;
+					const int tile_col = tile_ilng - ilng_min;
+					tile_options.uv_offset_u = tile_col * tile_uv_span;
+					tile_options.uv_scale_u = tile_uv_span;
+					tile_options.uv_offset_v = 1.0 - (tile_row + 1) * tile_uv_span;
+					tile_options.uv_scale_v = tile_uv_span;
 
-				// The mesh is built centred on the region centre; place it at the
-				// local-frame position of that centre so it aligns with the base origin.
-				const double region_center_lat_radians = (min_lat_radians + max_lat_radians) * 0.5;
-				const double region_center_lng_radians = (min_lng_radians + max_lng_radians) * 0.5;
-				const Vector3 terrain_offset = local_position_from_lon_lat(
-					base_location.latitude_degrees,
-					base_location.longitude_degrees,
-					region_center_lat_radians * kRadiansToDegrees,
-					region_center_lng_radians * kRadiansToDegrees,
-					0.0);
-
-				frame_scene_.terrain_patches.push_back({
-					{
-						terrain_asset_index,
-						terrain_offset,
-						{0.0, 0.0, 0.0},
-						{1.0, 1.0, 1.0},
-						{1.0f, 1.0f, 1.0f, 1.0f},
+					std::vector<float> positions, normals, uvs;
+					std::vector<uint16_t> indices;
+					if (!build_terrain_mesh(elev_archive, tile_options, positions, normals, uvs, indices, terrain_error)) {
+						warnings_.push_back(
+							"Earth terrain tile mesh build failed at " + std::to_string(tile_ilat) + ":" +
+							std::to_string(tile_ilng) + ": " + terrain_error);
+						meshes_ok = false;
+						break;
 					}
-				});
+
+					LoadedMesh terrain_mesh;
+					const size_t vertex_count = positions.size() / 3;
+					terrain_mesh.vertices.reserve(vertex_count);
+					for (size_t i = 0; i < vertex_count; ++i) {
+						terrain_mesh.vertices.push_back({
+							{positions[i * 3 + 0], positions[i * 3 + 1], positions[i * 3 + 2]},
+							{normals[i * 3 + 0], normals[i * 3 + 1], normals[i * 3 + 2]},
+							{uvs[i * 2 + 0], uvs[i * 2 + 1]},
+						});
+					}
+					terrain_mesh.indices = std::move(indices);
+					terrain_mesh.submeshes.push_back({
+						0,
+						static_cast<uint32_t>(terrain_mesh.indices.size()),
+						-1,
+						0,
+						false,
+					});
+					if (!texture_relative.empty()) {
+						terrain_mesh.textures.push_back(texture_relative);
+					}
+
+					const size_t terrain_asset_index = register_generated_asset(
+						"terrain:earth:p" + std::to_string(kTerrainPatchLevel) + ":" +
+						std::to_string(tile_ilat) + ":" + std::to_string(tile_ilng),
+						std::move(terrain_mesh),
+						asset_lookup,
+						frame_scene_.assets);
+
+					// Each tile mesh is centred on its own tile centre; place it
+					// at that centre's local-frame position relative to the base.
+					const Vector3 terrain_offset = local_position_from_lon_lat(
+						base_location.latitude_degrees,
+						base_location.longitude_degrees,
+						(tile_min_lat_radians + tile_max_lat_radians) * 0.5 * kRadiansToDegrees,
+						(tile_min_lng_radians + tile_max_lng_radians) * 0.5 * kRadiansToDegrees,
+						0.0);
+
+					frame_scene_.terrain_patches.push_back({
+						{
+							terrain_asset_index,
+							terrain_offset,
+							{0.0, 0.0, 0.0},
+							{1.0, 1.0, 1.0},
+							{1.0f, 1.0f, 1.0f, 1.0f},
+						}
+					});
+				}
+			}
+			if (meshes_ok) {
 				terrain_ready = true;
 				frame_scene_.using_procedural_ground = false;
-			} else {
-				warnings_.push_back("Earth terrain mesh build failed: " + terrain_error);
 			}
 		} else {
 			warnings_.push_back("Earth elevation archive failed to open: " + terrain_error);
