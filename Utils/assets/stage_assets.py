@@ -144,6 +144,23 @@ def main():
 
     staged = 0
     terrain_missing = []
+
+    # terrain archives: the 2024 release manifest does not list .tree files
+    # (they ship in the core terrain pack), so stage every archive found in
+    # planet-tex-dir to Textures/<Planet>/Archive/<name>.tree in the tree.
+    staged_targets = set(plan.keys())
+    for source in sorted(terrain.values()):
+        for src_path in source:
+            planet_dir = os.path.basename(os.path.dirname(os.path.dirname(src_path)))
+            target = os.path.join("Textures", planet_dir, "Archive", os.path.basename(src_path))
+            if target in staged_targets:
+                continue
+            dest = os.path.join(args.tree, target)
+            if not args.dry_run:
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.copy2(src_path, dest)
+            staged += 1
+
     for target, source in sorted(plan.items()):
         dest = os.path.join(args.tree, target)
         if source is None:  # terrain archive

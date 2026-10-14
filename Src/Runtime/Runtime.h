@@ -129,6 +129,7 @@ struct LaunchOptions {
 	std::filesystem::path content_root;
 	std::filesystem::path scenario_path;
 	std::filesystem::path user_data_root;
+	std::filesystem::path planet_tex_dir;
 	int max_frames = 300;
 	bool max_frames_explicit = false;
 	bool show_help = false;

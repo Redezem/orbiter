@@ -6,6 +6,7 @@
 #include "SimulationSession.h"
 #include "Paths.h"
 
+#include <cstdlib>
 #include <sstream>
 
 namespace {
@@ -13,6 +14,7 @@ namespace {
 constexpr const char *kScenarioArg = "--scenariox=";
 constexpr const char *kMaxFramesArg = "--maxframes=";
 constexpr const char *kBackendArg = "--backend=";
+constexpr const char *kPlanetTexDirArg = "--planetexdir=";
 constexpr const char *kOrbiterCoreStubError = "Orbiter core backend is not wired yet";
 
 bool starts_with(const std::string &value, const char *prefix)
@@ -106,11 +108,24 @@ LaunchOptions parse_launch_options(int argc, char **argv)
 			continue;
 		}
 
+		if (starts_with(arg, kPlanetTexDirArg)) {
+			options.planet_tex_dir = arg.substr(std::char_traits<char>::length(kPlanetTexDirArg));
+			continue;
+		}
+
 		options.error = "Unknown argument: " + arg;
 	}
 
 	if (!options.error.empty()) {
 		return options;
+	}
+
+	if (options.planet_tex_dir.empty()) {
+		if (const char *env = std::getenv("ORBITER_PLANET_TEX_DIR")) {
+			if (*env != '\0') {
+				options.planet_tex_dir = env;
+			}
+		}
 	}
 
 	if (options.scenario_path.is_relative()) {

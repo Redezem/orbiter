@@ -4,6 +4,7 @@
 add_library(OrbiterBootstrap STATIC
 	OrbiterMesh.cpp
 	SimulationSession.cpp
+	TerrainArchive.cpp
 )
 
 target_include_directories(OrbiterBootstrap
@@ -14,6 +15,7 @@ target_include_directories(OrbiterBootstrap
 
 target_link_libraries(OrbiterBootstrap
 	PUBLIC OrbiterPlatformRuntime
+	PRIVATE zlib
 )
 
 set_target_properties(OrbiterBootstrap

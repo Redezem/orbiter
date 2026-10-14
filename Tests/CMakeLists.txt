@@ -98,6 +98,12 @@ if(TARGET OrbiterRuntime)
 	add_runtime_test_file(Runtime.Session)
 endif()
 
+if(TARGET OrbiterBootstrap)
+	add_runtime_test_file(TerrainArchive)
+	target_include_directories(TerrainArchive PRIVATE ${CMAKE_SOURCE_DIR}/Src/Bootstrap)
+	target_link_libraries(TerrainArchive PRIVATE OrbiterBootstrap)
+endif()
+
 if (BUILD_ORBITER_SERVER)
 
 	add_test(
