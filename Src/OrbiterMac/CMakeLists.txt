@@ -20,10 +20,39 @@ add_executable(Orbiter_macOS MACOSX_BUNDLE
 	OrbiterMacApp.mm
 )
 
+Include(FetchContent)
+# The repo's shared imgui copy carries Orbiter's Windows-flavored imconfig.h
+# (__declspec GImGui export). The macOS HUD needs stock ImGui, so fetch an
+# unpatched copy under a distinct name used only by this target. Populate
+# (not MakeAvailable) to avoid add_subdirectory target-name collision with
+# the shared imgui INTERFACE target.
+FetchContent_Declare(
+	imgui_macos
+	GIT_REPOSITORY https://github.com/ocornut/imgui.git
+	GIT_TAG v1.92.5-docking
+	UPDATE_DISCONNECTED 1
+)
+FetchContent_GetProperties(imgui_macos)
+if (NOT imgui_macos_POPULATED)
+	FetchContent_Populate(imgui_macos)
+endif()
+
 target_include_directories(Orbiter_macOS
 	PRIVATE
 		${CMAKE_SOURCE_DIR}/Src/Runtime
 		${CMAKE_SOURCE_DIR}/Src/Bootstrap
+		${imgui_macos_SOURCE_DIR}
+		${imgui_macos_SOURCE_DIR}/backends
+)
+
+target_sources(Orbiter_macOS
+	PRIVATE
+		${imgui_macos_SOURCE_DIR}/imgui.cpp
+		${imgui_macos_SOURCE_DIR}/imgui_draw.cpp
+		${imgui_macos_SOURCE_DIR}/imgui_tables.cpp
+		${imgui_macos_SOURCE_DIR}/imgui_widgets.cpp
+		${imgui_macos_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
+		${imgui_macos_SOURCE_DIR}/backends/imgui_impl_metal.mm
 )
 
 target_link_libraries(Orbiter_macOS

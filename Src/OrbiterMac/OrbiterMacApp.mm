@@ -18,6 +18,10 @@
 
 #include <zlib.h>
 
+#include "imgui.h"
+#include "backends/imgui_impl_sdl3.h"
+#include "backends/imgui_impl_metal.h"
+
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -587,6 +591,11 @@ int run_app(const orbiter::runtime::LaunchOptions &options)
 		sampler_descriptor.tAddressMode = MTLSamplerAddressModeRepeat;
 		id<MTLSamplerState> sampler_state = [device newSamplerStateWithDescriptor:sampler_descriptor];
 
+		// HUD (ImGui) state for the live window only.
+		bool hud_ready = false;
+		bool hud_visible = true;
+		std::string imgui_ini_path;
+
 		MTKTextureLoader *texture_loader = [[MTKTextureLoader alloc] initWithDevice:device];
 		std::vector<GpuMeshAsset> gpu_assets;
 		if (!build_gpu_mesh_assets(
@@ -619,6 +628,22 @@ int run_app(const orbiter::runtime::LaunchOptions &options)
 			<< "User data: " << options.user_data_root << '\n';
 		for (const std::string &warning : session->warnings()) {
 			std::cout << "Warning: " << warning << '\n';
+		}
+
+		if (options.snapshot_path.empty()) {
+			IMGUI_CHECKVERSION();
+			ImGui::CreateContext();
+			ImGuiIO &imgui_io = ImGui::GetIO();
+			imgui_io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+			const std::filesystem::path imgui_ini = options.user_data_root / "imgui.ini";
+			imgui_ini_path = imgui_ini.string();
+			imgui_io.IniFilename = imgui_ini_path.c_str();
+			ImGui::StyleColorsDark();
+			if (ImGui_ImplSDL3_InitForMetal(window) && ImGui_ImplMetal_Init(device)) {
+				hud_ready = true;
+			} else {
+				std::cerr << "ImGui init failed; running without HUD\n";
+			}
 		}
 
 		if (!options.snapshot_path.empty()) {
@@ -721,31 +746,47 @@ int run_app(const orbiter::runtime::LaunchOptions &options)
 
 		while (running && (options.max_frames == 0 || frames < options.max_frames)) {
 			orbiter::runtime::ControlInput input{};
+			bool imgui_want_mouse = false;
+			bool imgui_want_keyboard = false;
 
 			SDL_Event event;
 			while (SDL_PollEvent(&event)) {
+				if (hud_ready) {
+					ImGui_ImplSDL3_ProcessEvent(&event);
+				}
+				if (hud_ready) {
+					const ImGuiIO &io = ImGui::GetIO();
+					imgui_want_mouse = io.WantCaptureMouse;
+					imgui_want_keyboard = io.WantCaptureKeyboard;
+				}
 				if (event.type == SDL_EVENT_QUIT) {
 					running = false;
 				} else if (event.type == SDL_EVENT_KEY_DOWN &&
-						   !event.key.repeat &&
-						   event.key.scancode == SDL_SCANCODE_P) {
+					   !event.key.repeat &&
+					   event.key.scancode == SDL_SCANCODE_P) {
 					input.pause_toggle = true;
+				} else if (event.type == SDL_EVENT_KEY_DOWN &&
+					   !event.key.repeat &&
+					   event.key.scancode == SDL_SCANCODE_H) {
+					hud_visible = !hud_visible;
 				} else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
-						   event.button.button == SDL_BUTTON_LEFT) {
+					   event.button.button == SDL_BUTTON_LEFT &&
+					   !imgui_want_mouse) {
 					dragging = true;
 				} else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP &&
-						   event.button.button == SDL_BUTTON_LEFT) {
+					   event.button.button == SDL_BUTTON_LEFT) {
 					dragging = false;
-				} else if (event.type == SDL_EVENT_MOUSE_MOTION && dragging) {
+				} else if (event.type == SDL_EVENT_MOUSE_MOTION && dragging && !imgui_want_mouse) {
 					camera_yaw_delta += -event.motion.xrel * 0.004;
 					camera_pitch_delta += -event.motion.yrel * 0.004;
-				} else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+				} else if (event.type == SDL_EVENT_MOUSE_WHEEL && !imgui_want_mouse) {
 					camera_zoom_delta += -event.wheel.y * 4.0;
 				}
 			}
 
 			const bool *keyboard = SDL_GetKeyboardState(nullptr);
 			input.thrust = 0.0;
+			if (!imgui_want_keyboard) {
 			if (keyboard[SDL_SCANCODE_W]) {
 				input.thrust += 1.0;
 			}
@@ -771,6 +812,7 @@ int run_app(const orbiter::runtime::LaunchOptions &options)
 				input.yaw += 1.0;
 			}
 			input.hover_hold = keyboard[SDL_SCANCODE_SPACE];
+			}
 			input.camera_yaw_delta = camera_yaw_delta;
 			input.camera_pitch_delta = camera_pitch_delta;
 			input.camera_zoom_delta = camera_zoom_delta;
@@ -783,6 +825,7 @@ int run_app(const orbiter::runtime::LaunchOptions &options)
 			previous_ticks = now_ticks;
 			session->step(dt, input);
 			const orbiter::runtime::FrameScene &scene = session->frame_scene();
+			const orbiter::runtime::VesselState &vessel = session->focus_vessel();
 
 			int width = 0;
 			int height = 0;
@@ -793,9 +836,9 @@ int run_app(const orbiter::runtime::LaunchOptions &options)
 				depth_texture.height != static_cast<NSUInteger>(height)) {
 				MTLTextureDescriptor *depth_texture_descriptor =
 					[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
-																 width:std::max(width, 1)
-																height:std::max(height, 1)
-															 mipmapped:NO];
+							width:std::max(width, 1)
+							height:std::max(height, 1)
+						mipmapped:NO];
 				depth_texture_descriptor.storageMode = MTLStorageModePrivate;
 				depth_texture_descriptor.usage = MTLTextureUsageRenderTarget;
 				depth_texture = [device newTextureWithDescriptor:depth_texture_descriptor];
@@ -826,6 +869,32 @@ int run_app(const orbiter::runtime::LaunchOptions &options)
 					sampler_state,
 					width,
 					height);
+
+				if (hud_ready && hud_visible) {
+					ImGui_ImplMetal_NewFrame(pass);
+					ImGui_ImplSDL3_NewFrame();
+					ImGui::NewFrame();
+
+					ImGui::Begin("Orbiter");
+					ImGui::Text("%s (%s)", vessel.name.c_str(), vessel.class_name.c_str());
+					ImGui::Text("Altitude  %.1f m", vessel.position.y);
+					const double speed = std::sqrt(
+						vessel.velocity.x * vessel.velocity.x +
+						vessel.velocity.y * vessel.velocity.y +
+						vessel.velocity.z * vessel.velocity.z);
+					ImGui::Text("Speed     %.1f m/s", speed);
+					ImGui::Text("Throttle  %.0f%%", vessel.throttle * 100.0);
+					ImGui::Text("Time      %.1f s", vessel.simulation_time);
+					ImGui::Separator();
+					ImGui::TextUnformatted("W/S thrust  A/D yaw  arrows pitch/roll");
+					ImGui::TextUnformatted("Space hover-hold  P pause  H toggle HUD");
+					ImGui::TextUnformatted("Drag mouse orbit camera  wheel zoom");
+					ImGui::End();
+
+					ImGui::Render();
+					ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), command_buffer, encoder);
+				}
+
 				[encoder endEncoding];
 				[command_buffer presentDrawable:drawable];
 				[command_buffer commit];
