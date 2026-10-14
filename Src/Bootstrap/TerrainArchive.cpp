@@ -582,9 +582,10 @@ bool build_terrain_mesh(
 			const uint16_t v10 = static_cast<uint16_t>((row + 1) * samples + col);
 			const uint16_t v11 = static_cast<uint16_t>((row + 1) * samples + col + 1);
 			// Counter-clockwise when viewed from above (+Y), matching the Metal
-			// renderer's front-facing winding.
-			indices.insert(indices.end(), {v00, v10, v11});
-			indices.insert(indices.end(), {v00, v11, v01});
+			// renderer's front-facing winding: (v00, v01, v11) has cross product
+			// (v01-v00) x (v11-v00) pointing +Y.
+			indices.insert(indices.end(), {v00, v01, v11});
+			indices.insert(indices.end(), {v00, v11, v10});
 		}
 	}
 
@@ -644,14 +645,14 @@ void png_be32(uint8_t *p, uint32_t value)
 void png_chunk(std::vector<uint8_t> &out, const char *type, const uint8_t *data, size_t length)
 {
 	const size_t header = out.size();
-	out.resize(header + 4 + length + 4);
+	out.resize(header + 12 + length);
 	png_be32(out.data() + header, static_cast<uint32_t>(length));
 	std::memcpy(out.data() + header + 4, type, 4);
 	if (length) {
 		std::memcpy(out.data() + header + 8, data, length);
 	}
 	const uint32_t crc = png_crc(0, out.data() + header + 4, 4 + length);
-	png_be32(out.data() + header + 4 + length + 4 - 4 + 4, crc);
+	png_be32(out.data() + header + 8 + length, crc);
 }
 
 } // namespace

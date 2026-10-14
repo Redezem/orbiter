@@ -23,12 +23,14 @@ add_executable(Orbiter_macOS MACOSX_BUNDLE
 target_include_directories(Orbiter_macOS
 	PRIVATE
 		${CMAKE_SOURCE_DIR}/Src/Runtime
+		${CMAKE_SOURCE_DIR}/Src/Bootstrap
 )
 
 target_link_libraries(Orbiter_macOS
 	PRIVATE
 		OrbiterRuntime
 		SDL3::SDL3
+		zlib
 		${FOUNDATION_FRAMEWORK}
 		${METAL_FRAMEWORK}
 		${METALKIT_FRAMEWORK}
@@ -37,8 +39,21 @@ target_link_libraries(Orbiter_macOS
 
 add_dependencies(Orbiter_macOS CopyData)
 
+# Bundle the SDL3 shared library into the app so it launches without any
+# system-wide SDL install, then ad-hoc re-sign the bundle.
+add_custom_command(TARGET Orbiter_macOS POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_DIR:Orbiter_macOS>/Contents/Frameworks"
+	COMMAND ${CMAKE_COMMAND} -E copy_if_different
+		"$<TARGET_FILE:SDL3::SDL3>"
+		"$<TARGET_BUNDLE_DIR:Orbiter_macOS>/Contents/Frameworks/libSDL3.0.dylib"
+	COMMAND codesign --force -s - "$<TARGET_BUNDLE_DIR:Orbiter_macOS>/Contents/Frameworks/libSDL3.0.dylib"
+	COMMAND codesign --force -s - "$<TARGET_BUNDLE_DIR:Orbiter_macOS>"
+)
+
 set_target_properties(Orbiter_macOS
 	PROPERTIES
+		BUILD_RPATH "@executable_path/../Frameworks"
+		INSTALL_RPATH "@executable_path/../Frameworks"
 		RUNTIME_OUTPUT_DIRECTORY ${ORBITER_BINARY_ROOT_DIR}
 		BUNDLE_OUTPUT_DIRECTORY ${ORBITER_BINARY_ROOT_DIR}
 		OUTPUT_NAME Orbiter

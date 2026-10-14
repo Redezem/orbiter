@@ -496,7 +496,7 @@ LoadedMesh make_unit_plane_mesh(const std::string &texture_name)
 		{{0.5f, 0.0f, 0.5f}, {0, 1, 0}, {1, 0}},
 		{{-0.5f, 0.0f, 0.5f}, {0, 1, 0}, {0, 0}},
 	};
-	std::vector<uint16_t> indices = {0, 1, 2, 0, 2, 3};
+	std::vector<uint16_t> indices = {0, 3, 2, 0, 2, 1};
 	return make_mesh_from_triangles(vertices, indices, texture_name.empty() ? std::vector<std::string>{} : std::vector<std::string>{texture_name});
 }
 
@@ -721,6 +721,9 @@ bool SimulationSession::initialize(const LaunchOptions &options, std::string &er
 
 	const double camera_length = std::max(length(scenario.camera_offset), 1.0);
 	camera_distance_ = camera_length;
+	if (options.initial_camera_distance > 0.0) {
+		camera_distance_ = options.initial_camera_distance;
+	}
 	camera_yaw_ = std::atan2(scenario.camera_offset.x, scenario.camera_offset.z);
 	camera_pitch_ = std::asin(std::clamp(scenario.camera_offset.y / camera_length, -1.0, 1.0));
 
@@ -823,6 +826,13 @@ bool SimulationSession::initialize(const LaunchOptions &options, std::string &er
 					});
 				}
 				terrain_mesh.indices = std::move(indices);
+				terrain_mesh.submeshes.push_back({
+					0,
+					static_cast<uint32_t>(terrain_mesh.indices.size()),
+					-1,
+					0,
+					false,
+				});
 
 				// Stitch the matching surface tiles into a PNG texture so the
 				// Metal texture loader can consume it (it cannot read DDS).
@@ -832,12 +842,24 @@ bool SimulationSession::initialize(const LaunchOptions &options, std::string &er
 				TerrainArchive surf_archive;
 				std::string surf_error;
 				if (std::filesystem::exists(surf_archive_path) && surf_archive.open(surf_archive_path, surf_error)) {
+					// Surface archives do not carry every patch level everywhere
+					// (ocean tiles are absent near KSC). Load each tile at the
+					// finest available level, like the legacy ZTreeMgr does.
 					std::vector<TerrainSurfaceTile> surf_tiles;
 					bool all_tiles = true;
-					for (int ilat = ilat_min; ilat <= ilat_max && all_tiles; ++ilat) {
-						for (int ilng = ilng_min; ilng <= ilng_max; ++ilng) {
+					for (int tile_ilat = ilat_min; tile_ilat <= ilat_max && all_tiles; ++tile_ilat) {
+						for (int tile_ilng = ilng_min; tile_ilng <= ilng_max; ++tile_ilng) {
 							TerrainSurfaceTile tile;
-							if (!surf_archive.load_surface_tile(kTerrainPatchLevel, ilat, ilng, tile, surf_error)) {
+							bool loaded = false;
+							for (int level = kTerrainPatchLevel; level >= 8 && !loaded; --level) {
+								const int shift = kTerrainPatchLevel - level;
+								const int parent_ilat = tile_ilat >> shift;
+								const int parent_ilng = tile_ilng >> shift;
+								if (surf_archive.load_surface_tile(level, parent_ilat, parent_ilng, tile, surf_error)) {
+									loaded = true;
+								}
+							}
+							if (!loaded) {
 								all_tiles = false;
 								break;
 							}

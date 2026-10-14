@@ -15,6 +15,8 @@ constexpr const char *kScenarioArg = "--scenariox=";
 constexpr const char *kMaxFramesArg = "--maxframes=";
 constexpr const char *kBackendArg = "--backend=";
 constexpr const char *kPlanetTexDirArg = "--planetexdir=";
+constexpr const char *kSnapshotArg = "--snapshot=";
+constexpr const char *kCameraDistanceArg = "--camdist=";
 constexpr const char *kOrbiterCoreStubError = "Orbiter core backend is not wired yet";
 
 bool starts_with(const std::string &value, const char *prefix)
@@ -110,6 +112,20 @@ LaunchOptions parse_launch_options(int argc, char **argv)
 
 		if (starts_with(arg, kPlanetTexDirArg)) {
 			options.planet_tex_dir = arg.substr(std::char_traits<char>::length(kPlanetTexDirArg));
+			continue;
+		}
+
+		if (starts_with(arg, kSnapshotArg)) {
+			options.snapshot_path = arg.substr(std::char_traits<char>::length(kSnapshotArg));
+			continue;
+		}
+
+		if (starts_with(arg, kCameraDistanceArg)) {
+			try {
+				options.initial_camera_distance = std::stod(arg.substr(std::char_traits<char>::length(kCameraDistanceArg)));
+			} catch (...) {
+				options.error = "Invalid value for --camdist";
+			}
 			continue;
 		}
 
