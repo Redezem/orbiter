@@ -101,6 +101,23 @@ foreach(spec "Moon:Moon/ELP82.dat:ELP82.dat" "Jupiter:Galsat/ephem_e15.dat:ephem
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ORB_CELBODY_SRC}/${source} ${ORB_NATIVE_CONTENT_DIR}/Config/${body}/Data/${filename})
 endforeach()
 
+# Real stock Earth default atmosphere. J71G is self-contained: its ATMOSPHERE
+# base and SDK queries resolve against the exported engine, with no coefficient
+# files or atmosphere support library. Restore SDK process-attach/detach callbacks
+# through the same native constructor seam as the celestial theory dependencies.
+orb_celbody_target(EarthAtmJ71G
+	${ORB_CELBODY_SRC}/Vsop87/Earth/Atmosphere/EarthAtmJ71G/EarthAtmJ71G.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/celbody_dependency_init.cpp)
+target_compile_definitions(EarthAtmJ71G PRIVATE ORB_EPHEMERIS_HAS_EXIT)
+set_target_properties(EarthAtmJ71G PROPERTIES
+	LIBRARY_OUTPUT_DIRECTORY ${ORB_MODULE_DIR}/Celbody/Earth/Atmosphere)
+add_custom_target(native-atmospheres DEPENDS EarthAtmJ71G)
+add_custom_target(stage-native-atmospheres DEPENDS native-atmospheres
+	COMMAND ${CMAKE_COMMAND} -E make_directory ${ORB_NATIVE_CONTENT_DIR}/Modules/Celbody/Earth/Atmosphere
+	COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:EarthAtmJ71G>
+		${ORB_NATIVE_CONTENT_DIR}/Modules/Celbody/Earth/Atmosphere/
+	VERBATIM)
+
 # Lua interpreter library (Quadcopter's Lua interface links it).
 # Glob like Extern/Lua does — this vendored Lua is 5.1 (no lctype/lbitlib).
 file(GLOB ORB_LUA_C "${ORB_LUA_SRC}/*.c")

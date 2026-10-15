@@ -218,6 +218,15 @@ if(ORBITER_BUILD_ELEVATION_PROBE)
 	endforeach()
 endif()
 
+option(ORBITER_BUILD_ATMOSPHERE_PROBE "Build the real-engine atmosphere scalar probe" OFF)
+if(ORBITER_BUILD_ATMOSPHERE_PROBE)
+	add_executable(orbiter-atmosphere-probe smoke/atmosphere_probe.cpp)
+	foreach(prop INCLUDE_DIRECTORIES COMPILE_DEFINITIONS LINK_LIBRARIES LINK_OPTIONS)
+		get_target_property(value orbiter-core-smoke ${prop})
+		set_property(TARGET orbiter-atmosphere-probe PROPERTY ${prop} "${value}")
+	endforeach()
+endif()
+
 # Native vessel modules (real Src/Vessel sources built as .dylib against the
 # engine host's exported symbols)
 add_subdirectory(modules)
