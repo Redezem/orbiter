@@ -480,6 +480,154 @@ That standalone test executable owns its own test context, never a second contex
 inside the engine process. GPU/readback and hidden-window lifecycle checks remain
 required. This does not claim complete cockpit/HUD/MFD or interactive-app readiness.
 
+## Animation contract discovery (not animated rendering)
+
+```sh
+python3 Src/OrbiterCore/metal/animation_contract_regression.py \
+  out/build/macos-core-spike/Src/OrbiterCore/metal/orbiter-core-metal \
+  out/stage/content /Users/redezem/.hermes/cache/scratch/orbiter-animation-contract
+```
+
+The test-only trailing `--animation-contract-test` requires an existing mesh
+snapshot mode and rejects session-input combinations. It reads the real DG gear
+definition through `GetAnimPtr`, identifies its 14 root rotations structurally
+(not by a hard-coded animation ID), and exports intervals, groups, pivots, axes,
+angles and hierarchy. Actual `VESSEL::SetAnimation` calls set 0, 0.5 and 1;
+both `GetAnimation` and a freshly acquired `GetAnimPtr` must read each back.
+The original state is restored before the ordinary frame loop. These are
+**test-controlled engine animation states**, not gear-subsystem operation.
+
+A same-value `SetMeshVisibilityMode` call positively proves registered visual
+event transport, object/visual identity and context without changing visibility.
+In contrast, all three real animation setters emit zero visual events and leave
+all mesh-0 template vertex/index bytes unchanged. `GetDevMesh` remains null.
+The Metal callback still returns 0 for unsupported events, never fake success.
+Three paired textured lifecycles verify identical static GPU images after the
+proof restores state, GPU completion and normal teardown. Parser sensitivity
+checks are not an animated-GPU negative control.
+
+**This contract-only mode does not animate visuals or expose device meshes.** The
+client must evaluate animation definitions itself; the engine does not deliver
+deformed groups in response to `SetAnimation`. In the fixture, template gear
+`defstate=1` but scenario `state=0`, so applying only later state changes would
+already be wrong on the first render. D3D9 `VVessel.cpp` lines 76–94, 520–583 and
+1582–1711 show initialization, per-update polling, interval/pivot evaluation,
+direction-dependent component ordering and recursive child-frame propagation.
+DG gear is a useful bounded follow-on (14 root ROTATE components on mesh 0);
+nosecone additionally needs TRANSLATE and cockpit filtering. Any future opt-in
+gear slice must own per-visual group transforms/handles, initialize from
+`defstate` to scenario state, preserve immutable templates and texture pins,
+reject unsupported topology/transform edits, and prove two API-controlled GPU
+states with independent geometry/matrix/readback and a frozen-transform control.
+The existing static modes, event returns and texture lifetimes are unchanged.
+
+## Bounded DG gear GPU animation test
+
+```sh
+python3 Src/OrbiterCore/metal/gear_animation_regression.py \
+  out/build/macos-core-spike/Src/OrbiterCore/metal/orbiter-core-metal \
+  out/stage/content /Users/redezem/.hermes/cache/scratch/orbiter-gear-check
+clang++ -std=c++17 -fsanitize=address,undefined \
+  Src/OrbiterCore/metal/test_gear_math.cpp \
+  -o /Users/redezem/.hermes/cache/scratch/orbiter-gear-math-test
+/Users/redezem/.hermes/cache/scratch/orbiter-gear-math-test
+```
+
+Append `--gear-animation-test` to `--textures snapshot.ppm` for the verified
+textured slice. It requires that exact snapshot mode and at least two frames;
+contract/input/hidden-present and moving-camera test combinations are rejected.
+All rendering remains hidden/offscreen.
+This is **only the exact DG external mesh-0 gear signature**, 14 root ROTATE
+components/default 1. It does not support general animations, hierarchy,
+LOCALVERTEXLIST, whole-mesh transforms, translation/scaling, cockpit/nosecone
+animation, device group get/edit, or gear physics.
+
+`GearVisual` owns a private per-visual mesh instance: original group vertices,
+normals, indices and metadata, local group matrices and separate mesh offset.
+It initializes default 1 -> loaded 0 before drawing, polls fresh `GetAnimPtr`
+each render, copies definitions and rejects selected-definition or geometry/
+metadata/offset changes instead of retaining engine definition pointers. Reset/
+replay follows D3D9 `Animate` direction ordering and `TransformGroup` composition;
+rotation matches `D3DMAT_RotationFromAxis`, including the source's slightly
+non-unit `(0,.052,.999)` axis. Never normalize that axis into a different
+transform. Shader group transforms operate in mesh-local space before mesh
+offset and actual engine camera/world projection; normals rotate separately
+before shade evaluation. Legacy shaders are unchanged outside this opt-in.
+Texture handles, existing per-draw pins and resource teardown remain intact.
+
+`clbkGetMesh` returns a live opaque token only for the exact registered visual
+and mesh 0, never a template. Foreign visual/index and retired tokens are
+rejected; tombstones prevent live-registry identity reuse. The inherited group
+get/edit callbacks still return **-2 unsupported**, including on the live handle.
+The token is created **after** `RegisterVisObject` synchronously calls the vessel's
+`clbkVisualCreated`: `GetDevMesh` in that creation callback therefore returns null
+(DG caches null there). The later explicit live-token lookup does not establish
+callback-time device-mesh support. Full vessel device-mesh callbacks are deferred.
+Actual `SetAnimation` is test-controlled **after simulation stepping and before
+draw**; immediate/fresh-definition and post-GPU readbacks must remain 0/1. The
+original state is restored on detach, before unregister/world teardown. This
+is not integration with GearControl's physical subsystem.
+
+The runner repeats three positive and three frozen-group-transform lifecycles,
+12 frames each, same real camera in both states, normal core/ImGui teardown.
+The diagnostic `--gear-animation-frozen-test` leaves GPU group transforms at
+state 0 while actual engine state changes to 1. The **same independent image
+oracle process** must exit nonzero after the renderer itself tears down normally.
+It is not a corrupted-log or fabricated-image test.
+
+Real pre-UI GPU PPMs, source geometry/normals/definitions, actual bound group
+matrices and engine-camera data are retained. The scalar CPU oracle independently
+applies quaternion vector rotations and engine world/camera projection (not
+renderer group matrices) and samples actual DDS texels through Pillow. A fixed
+2-pixel raster excludes triangle/texel boundaries and near-coplanar ties using
+geometry alone. Verified fixture: 814 gear and 13,525 invariant vertices, maximum
+bound/source position error below 4.1e-7 m, 153 gear pixel samples, 49 predicted
+moving gear samples and 7,327 unchanged non-gear samples, zero mismatches in all
+three runs. Frozen GPU transforms are rejected by actual gear pixel/motion
+mismatches despite correct real engine state readbacks. Older static paths and
+the separate contract proof remain unchanged.
+
+### Gear detach failure/retry regression
+
+```sh
+clang++ -std=c++17 -fsanitize=address,undefined -g \
+  Src/OrbiterCore/metal/test_gear_lifecycle.cpp \
+  -o /Users/redezem/.hermes/cache/scratch/orbiter-gear-lifecycle-test
+/Users/redezem/.hermes/cache/scratch/orbiter-gear-lifecycle-test
+python3 Src/OrbiterCore/metal/gear_cleanup_regression.py \
+  out/build/macos-core-spike/Src/OrbiterCore/metal/orbiter-core-metal \
+  out/stage/content /Users/redezem/.hermes/cache/scratch/orbiter-gear-cleanup
+```
+
+Token retirement no longer discards outstanding animation restoration. Detach
+records validation diagnostics, then independently validates the current owner,
+fresh animation-array slot/count and copied definition before restoring the
+loaded state. Geometry/offset mismatch does not block that safe restoration;
+removed/redefined animation slots do. A rejected/throwing/inert setter retains
+the pending restoration for retry, with getter and fresh-array readbacks required.
+The client attempts one bounded retry before world close. Diagnostics remain a
+failed process result even if restoration succeeds on retry. Unpins, visual
+unregister and world close are independent nonthrowing cleanup steps, not skipped
+by the gear diagnostic. This is not a general engine-exception recovery guarantee.
+
+The CPU test compiles the **production header** against a minimal synthetic engine
+seam: it changes only fixture-owned geometry, verifies rejection after state
+change, repairs it and retries restoration, tests false/throwing/inert setters,
+removed/redefined IDs, fresh component-array storage, missing owners and cleanup
+continuation. It is not a live shared-engine mutation experiment. The integration
+runner explicitly enables `--gear-cleanup-fault-test` alongside the gear mode;
+this injects a **client-only validation failure at detach**, never alters shared
+engine arrays, and requires engine exit 1/teardown FAIL while restoration, pin
+release, visual unregister and world close markers are present. All frames are
+real hidden Metal frames. This does not test live geometry corruption or a real
+engine setter failure. SDK animation definitions have no generation identifier;
+identity here is owner/slot plus exact copied semantics, not arbitrary identical
+delete/recreate ABA detection across unsupported lifecycle changes.
+
+The C++ gear composition checks establish internal consistency, not an independent
+matrix multiplication oracle; the separate Python scalar quaternion/source and
+GPU pixel oracle remains the independent mathematical check.
+
 ## Review dispositions
 
 Independent review requested staging safety and UI-isolated camera image checks;

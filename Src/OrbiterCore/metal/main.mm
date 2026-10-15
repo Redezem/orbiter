@@ -1,5 +1,5 @@
 // Real OrbiterCore -> GraphicsClient -> Metal lifecycle probe.
-// Optional static focus-vessel template mesh diagnostic; no terrain/surfaces/HUD.
+// Static template diagnostics plus opt-in DG gear instance test; no terrain/HUD.
 // Keep the engine's Win32-compatible int BOOL distinct from Objective-C's bool BOOL.
 // Renaming the alias locally preserves the C++ ABI without changing shared headers.
 #define BOOL OrbiterWinBOOL
@@ -35,6 +35,8 @@
 #include "imgui_platform.h"
 #include "backends/imgui_impl_sdl3.h"
 #include "imgui_input_probe.h"
+#include "animation_contract_probe.h"
+#include "gear_visual.h"
 
 extern Orbiter *g_pOrbiter;
 
@@ -62,6 +64,12 @@ public:
         visual_object_ = vessel->GetHandle();
         RegisterVisObject(visual_object_, reinterpret_cast<VISHANDLE>(this));
         ++visual_register;
+        if(gearTest) { gear_=std::make_unique<core_metal::GearVisual>(); gear_->attach(vessel);
+            check(vessel->GetDevMesh(reinterpret_cast<VISHANDLE>(this),0)==gear_->handle && !clbkGetMesh(reinterpret_cast<VISHANDLE>(1),0) && !clbkGetMesh(reinterpret_cast<VISHANDLE>(this),1),"gear exact device mesh lookup");
+            check(clbkGetMeshGroup(reinterpret_cast<DEVMESHHANDLE>(gear_->handle),0,nullptr)==-2 && clbkEditMeshGroup(reinterpret_cast<DEVMESHHANDLE>(gear_->handle),0,nullptr)==-2,"unsupported device group APIs must reject");
+            printf("[core-metal] gear_device_lookup exact=1 foreign_visual_rejected=1 foreign_index_rejected=1 get_edit=unsupported\n");
+        }
+        std::vector<std::array<float,4>> normals;
         struct SourceVertex { double x,y,z; float shade; };
         std::vector<SourceVertex> source;
         std::vector<uint32_t> indices;
@@ -73,6 +81,7 @@ public:
         for (unsigned m=0; m<mesh_count; ++m) {
             WORD visibility = vessel->GetMeshVisibilityMode(m);
             if (!(visibility & MESHVIS_EXTERNAL)) continue;
+            if(gear_) check(m==0,"gear slice supports only external mesh 0");
             MESHHANDLE mesh = vessel->GetMeshTemplate(m);
             check(mesh != nullptr, "visible mesh has no preloaded engine template (on-demand unsupported)");
             VECTOR3 offset;
@@ -123,13 +132,15 @@ public:
                 if(materials_) material_palette_.push_back(diffuse);
                 check(group->Vtx && group->Idx && group->nVtx && group->nIdx % 3 == 0, "invalid triangle group");
                 uint32_t base = static_cast<uint32_t>(source.size());
+                if(gear_) gear_->draws.push_back({g,base,indices.size(),group->nIdx});
                 if(textures_) {
                     if(textureHandle) check(texture_store_->pin(textureHandle),"texture mesh pin failed");
                     texture_ranges_.push_back({indices.size(),group->nIdx,textureHandle});
                 }
                 for (DWORD i=0; i<group->nVtx; ++i) {
                     const auto &v=group->Vtx[i];
-                    double x=v.x+offset.x,y=v.y+offset.y,z=v.z+offset.z;
+                    double x=v.x+(gear_?0:offset.x),y=v.y+(gear_?0:offset.y),z=v.z+(gear_?0:offset.z);
+                    if(gear_) {check(std::isfinite(v.nx)&&std::isfinite(v.ny)&&std::isfinite(v.nz),"gear nonfinite source normal"); normals.push_back({v.nx,v.ny,v.nz,0});}
                     check(std::isfinite(x)&&std::isfinite(y)&&std::isfinite(z), "nonfinite mesh vertex");
                     // Right/up/depth form a fixed orthonormal diagnostic view, not engine camera support.
                     source.push_back({engine_camera_ ? x : 0.8*x-0.6*z,
@@ -178,6 +189,11 @@ public:
             material_colors_=[device_ newBufferWithBytes:colors.data() length:colors.size()*sizeof(colors[0]) options:MTLResourceStorageModeShared];
             check(material_colors_!=nil,"material GPU upload failed");
         }
+        if(gear_) {
+            gear_normals_=[device_ newBufferWithBytes:normals.data() length:normals.size()*sizeof(normals[0]) options:MTLResourceStorageModeShared];
+            check(gear_normals_!=nil,"gear normals upload");
+            gear_->exportSource(snapshot_+".gear-source.json");
+        }
         NSError *error=nil;
         if(textures_) {
             texture_uvs_=[device_ newBufferWithBytes:uvs.data() length:uvs.size()*sizeof(uvs[0]) options:MTLResourceStorageModeShared];
@@ -186,6 +202,10 @@ public:
         NSString *shader=@"#include <metal_stdlib>\nusing namespace metal;\nstruct V { float4 p; }; struct O { float4 p [[position]]; float shade; };\nvertex O mesh_vertex(uint i [[vertex_id]], const device V* v [[buffer(0)]], constant float4x4& clip [[buffer(1)]]) { O o; o.p=clip*float4(v[i].p.xyz,1); o.shade=v[i].p.w; return o; }\nfragment float4 mesh_fragment(O i [[stage_in]]) { return float4(i.shade,i.shade,i.shade,1); }";
         if(materials_) shader=@"#include <metal_stdlib>\nusing namespace metal;\nstruct V { float4 p; }; struct O { float4 p [[position]]; float shade; float4 diffuse; };\nvertex O mesh_vertex(uint i [[vertex_id]], const device V* v [[buffer(0)]], constant float4x4& clip [[buffer(1)]], const device float4* colors [[buffer(2)]]) { O o; o.p=clip*float4(v[i].p.xyz,1); o.shade=v[i].p.w; o.diffuse=colors[i]; return o; }\nfragment float4 mesh_fragment(O i [[stage_in]]) { return float4(i.diffuse.rgb*i.shade,1); }";
         if(textures_) shader=@"#include <metal_stdlib>\nusing namespace metal;\nstruct V { float4 p; }; struct O { float4 p [[position]]; float shade; float4 diffuse; float2 uv; };\nvertex O mesh_vertex(uint i [[vertex_id]], const device V* v [[buffer(0)]], constant float4x4& clip [[buffer(1)]], const device float4* colors [[buffer(2)]], const device float2* uv [[buffer(3)]]) { O o; o.p=clip*float4(v[i].p.xyz,1); o.shade=v[i].p.w; o.diffuse=colors[i]; o.uv=uv[i]; return o; }\nfragment float4 mesh_fragment(O i [[stage_in]], texture2d<float> tex [[texture(0)]], constant uint& enabled [[buffer(0)]]) { constexpr sampler s(coord::normalized,address::repeat,filter::nearest,mip_filter::none); float3 sample=float3(1); if(enabled) sample=tex.sample(s,i.uv,level(0)).rgb; return float4(sample*i.diffuse.rgb*i.shade,1); }";
+        if(gear_) {
+            shader=[shader stringByReplacingOccurrencesOfString:@"constant float4x4& clip [[buffer(1)]]" withString:@"constant float4x4& clip [[buffer(1)]], const device float4* normals [[buffer(4)]], constant float4x4& group [[buffer(5)]], constant float4& offset [[buffer(6)]]"];
+            shader=[shader stringByReplacingOccurrencesOfString:@"o.p=clip*float4(v[i].p.xyz,1); o.shade=v[i].p.w;" withString:@"float3 p=(group*float4(v[i].p.xyz,1)).xyz+offset.xyz; float3 n=(group*float4(normals[i].xyz,0)).xyz; o.p=clip*float4(p,1); o.shade=clamp(0.35f+0.6f*abs(dot(float3(0.48f,0.6f,0.64f),n)),0.35f,0.95f);"];
+        }
         id<MTLLibrary> library=[device_ newLibraryWithSource:shader options:nil error:&error];
         if(!library) throw std::runtime_error(error.description.UTF8String);
         auto pipeline=[MTLRenderPipelineDescriptor new];
@@ -202,24 +222,55 @@ public:
         mesh_depth_=[device_ newTextureWithDescriptor:td];
         check(mesh_depth_state_ && mesh_depth_, "mesh depth allocation failed");
     }
-    void detachFocusMesh() {
-        if(texture_store_) {
-            for(auto &range:texture_ranges_) if(range.handle) texture_store_->unpin(range.handle);
-            texture_ranges_.clear(); texture_uvs_=nil;
-            printf("[core-metal] texture_mesh_pins_released=1 before_engine_teardown=1\n");
+    MESHHANDLE clbkGetMesh(VISHANDLE visual, DWORD index) override {
+        return gear_ && visual_object_ && visual==reinterpret_cast<VISHANDLE>(this) && index==0 && gear_->handles.valid(gear_->handle) ? gear_->handle : nullptr;
+    }
+    bool gearTest=false,gearFreeze=false,gearCleanupFault=false;
+    unsigned gearSplit=0;
+    bool detachFocusMesh() noexcept {
+        bool ok=true;
+        if(gear_) {
+            if(gearCleanupFault) gear_->validationFaultForTest=true;
+            ok &= gear_->detach();
+            // One bounded retry for a transient setter failure, before world close.
+            // Keep the first failure even when the retry succeeds.
+            if(gear_->restorationPending()) ok &= gear_->detach();
+            ok &= core_metal::cleanupStep("gear token",[&]{check(!clbkGetMesh(reinterpret_cast<VISHANDLE>(this),0),"retired device mesh exposed");});
+            gear_normals_=nil;
         }
-        if(visual_object_) { UnregisterVisObject(visual_object_); visual_object_=nullptr; ++visual_unregister; }
+
+        if(texture_store_) {
+            bool pinsOK=true;
+            for(auto &range:texture_ranges_) if(range.handle)
+                pinsOK &= core_metal::cleanupStep("texture unpin",[&]{texture_store_->unpin(range.handle);});
+            ok &= pinsOK;
+            texture_ranges_.clear(); texture_uvs_=nil;
+            printf("[core-metal] texture_mesh_pins_released=%u before_engine_teardown=1\n",pinsOK);
+        }
+        if(visual_object_) {
+            ok &= core_metal::cleanupStep("visual unregister",[&]{UnregisterVisObject(visual_object_); ++visual_unregister; printf("[core-metal] visual_unregistered=1 before_engine_teardown=1\n");});
+            visual_object_=nullptr;
+        }
         // All command buffers are synchronously completed; no engine material pointer
         // was retained. Drop the material GPU copy before world/template destruction.
         if(materials_ && material_colors_) {
             material_colors_=nil;
             printf("[core-metal] material_resources_released=1 before_engine_teardown=1\n");
         }
+        return ok;
     }
-    int clbkVisEvent(OBJHANDLE, VISHANDLE, DWORD, DWORD_PTR) override {
+    int clbkVisEvent(OBJHANDLE object, VISHANDLE visual, DWORD message, DWORD_PTR context) override {
         ++unsupported_visual_events;
+        if(animationContract) {
+            lastVisualEvent=message; lastVisualContext=context;
+            lastVisualIdentityOK=object==visual_object_ && visual==reinterpret_cast<VISHANDLE>(this);
+        }
         return 0; // Template snapshot only: never claim animation or instance mutation support.
     }
+    bool animationContract=false, lastVisualIdentityOK=false;
+    DWORD lastVisualEvent=0;
+    DWORD_PTR lastVisualContext=0;
+    unsigned visualEventCount() const { return unsupported_visual_events; }
     ~CoreMetalClient() override { release(); }
     bool platformInput=false;
     SDL_WindowID windowID() const { return SDL_GetWindowID(window_); }
@@ -393,7 +444,9 @@ protected:
         ++hidden_checks;
         if(textures_) for(const auto &range:texture_ranges_)
             check(!range.handle || texture_store_->lookup(range.handle),"stale/foreign texture draw handle");
+        if(gear_) gear_->update(renders,gearSplit,gearFreeze); // after actual engine step, before draw
         if(engine_camera_) updateEngineCamera();
+        if(gear_) controlled_view_=renders>gearSplit ? 2 : 1; // snapshot state label, NOT camera mutation
         drawable_ = present_ ? [layer_ nextDrawable] : nil;
         if (present_ && !drawable_) throw std::runtime_error("hidden layer returned no drawable; presentation unavailable (window will NOT be shown)");
         if (drawable_) ++acquired;
@@ -416,6 +469,11 @@ protected:
             [encoder_ setDepthStencilState:mesh_depth_state_];
             [encoder_ setCullMode:MTLCullModeNone];
             [encoder_ setVertexBuffer:mesh_vertices_ offset:0 atIndex:0];
+            if(gear_) {
+                [encoder_ setVertexBuffer:gear_normals_ offset:0 atIndex:4];
+                float offset[4]={float(gear_->offset.x),float(gear_->offset.y),float(gear_->offset.z),0};
+                [encoder_ setVertexBytes:offset length:sizeof(offset) atIndex:6];
+            }
             if(textures_) [encoder_ setVertexBuffer:texture_uvs_ offset:0 atIndex:3];
             if(materials_) [encoder_ setVertexBuffer:material_colors_ offset:0 atIndex:2];
             if (!freeze_clip_ || renders==1) std::copy(clip_,clip_+16,gpu_clip_);
@@ -426,7 +484,9 @@ protected:
                 printf("]\n");
             }
             if(textures_) {
+                size_t draw=0;
                 for(const auto &range:texture_ranges_) {
+                    if(gear_) {const auto &m=gear_->bound[gear_->draws.at(draw++).group]; [encoder_ setVertexBytes:m.data() length:sizeof(m) atIndex:5];}
                     const auto *entry=texture_store_->lookup(range.handle);
                     unsigned enabled=entry && !ignore_sampling_;
                     [encoder_ setFragmentTexture:entry ? entry->payload : nil atIndex:0];
@@ -434,6 +494,11 @@ protected:
                     [encoder_ drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:range.count
                         indexType:MTLIndexTypeUInt32 indexBuffer:mesh_indices_ indexBufferOffset:range.first*sizeof(uint32_t)];
                     ++texture_group_draws_;
+                }
+            } else if(gear_) {
+                for(const auto &d:gear_->draws) {const auto &m=gear_->bound[d.group];
+                    [encoder_ setVertexBytes:m.data() length:sizeof(m) atIndex:5];
+                    [encoder_ drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:d.count indexType:MTLIndexTypeUInt32 indexBuffer:mesh_indices_ indexBufferOffset:d.first*sizeof(uint32_t)];
                 }
             } else [encoder_ drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:uploaded_triangles*3
                 indexType:MTLIndexTypeUInt32 indexBuffer:mesh_indices_ indexBufferOffset:0];
@@ -466,6 +531,11 @@ protected:
             return false;
         }
         ++completed;
+        if(gear_) {
+            double expected=renders<=gearSplit ? 0 : 1;
+            check(oapiGetFocusInterface()->GetAnimation(gear_->id)==expected,"gear state changed during draw");
+            printf("[core-metal] gear_after_gpu frame=%u state=%.17g unchanged=1\n",renders,expected);
+        }
         if (present_) {
             // GPU completion does not imply presentation. Hidden windows may never scan out.
             // Bounded wait only; never activate/show a window to force WindowServer progress.
@@ -599,6 +669,7 @@ private:
             texture_ranges_.clear(); texture_uvs_=nil; texture_store_.reset();
             printf("[core-metal] texture_store_destroyed=1\n");
         }
+        gear_normals_=nil; gear_.reset();
         material_colors_=nil; material_palette_.clear();
         mesh_vertices_=nil; mesh_indices_=nil; mesh_pipeline_=nil; mesh_depth_state_=nil; mesh_depth_=nil;
         mesh_oracle_=nil;
@@ -610,6 +681,8 @@ private:
         if (sdl_) SDL_Quit();
         sdl_ = false;
     }
+    std::unique_ptr<core_metal::GearVisual> gear_;
+    id<MTLBuffer> gear_normals_=nil;
     bool present_, engine_camera_=false, freeze_clip_=false, materials_=false, sdl_ = false, imgui_ready_ = false;
     ImGuiContext *platform_context_=nullptr;
     bool platform_ready_=false;
@@ -655,9 +728,13 @@ int main(int argc, char **argv) {
     // Independent trailing session/presentation options leave old positional modes intact.
     bool session=false, sessionTest=false, ignoreInput=false, present=false, bufferedTest=false, ignoreBuffer=false;
     bool platformInput=false,imguiTest=false,ignoreForward=false;
+    bool animationContract=false,gearTest=false,gearFreeze=false,gearCleanupFault=false;
     while(argc>3) {
         std::string option=argv[argc-1];
         if(option=="--hidden-present") { if(present) return 2; present=true; --argc; }
+        else if(option=="--gear-cleanup-fault-test") { if(gearCleanupFault) return 2; gearCleanupFault=true; --argc; }
+        else if(option=="--gear-animation-test" || option=="--gear-animation-frozen-test") { if(gearTest) return 2; gearTest=true; gearFreeze=option=="--gear-animation-frozen-test"; --argc; }
+        else if(option=="--animation-contract-test") { if(animationContract) return 2; animationContract=true; --argc; }
         else if(option=="--platform-input" || option=="--imgui-input-test" || option=="--imgui-input-ignore-test") {
             if(session) return 2;
             session=true; platformInput=true; imguiTest=option!="--platform-input"; ignoreForward=option=="--imgui-input-ignore-test"; --argc;
@@ -672,7 +749,7 @@ int main(int argc, char **argv) {
         } else break;
     }
     if (argc < 3 || argc > 6) {
-        fprintf(stderr,"Usage (from content root): orbiter-core-metal <scenario> <frames 1..10000> [--mesh snapshot.ppm | --engine-camera snapshot.ppm | --engine-camera-test snapshot.ppm | --diagnostic-frozen-camera-test snapshot.ppm | --materials snapshot.ppm | --materials-test snapshot.ppm | --materials-reference-test snapshot.ppm | --textures snapshot.ppm | --textures-test snapshot.ppm | --textures-ignore-sampling-test snapshot.ppm] [--hidden-present] [--platform-input | --imgui-input-test | --imgui-input-ignore-test | --buffered-input-test | --buffered-input-ignore-test | --session-input | --session-input-test | --session-input-ignore-test]\nSession test modes require a bound of at least 16 frames; all windows remain hidden.\n");
+        fprintf(stderr,"Usage (from content root): orbiter-core-metal <scenario> <frames 1..10000> [--mesh snapshot.ppm | --engine-camera snapshot.ppm | --engine-camera-test snapshot.ppm | --diagnostic-frozen-camera-test snapshot.ppm | --materials snapshot.ppm | --materials-test snapshot.ppm | --materials-reference-test snapshot.ppm | --textures snapshot.ppm | --textures-test snapshot.ppm | --textures-ignore-sampling-test snapshot.ppm] [--hidden-present] [--animation-contract-test | --gear-animation-test | --gear-animation-frozen-test] [--platform-input | --imgui-input-test | --imgui-input-ignore-test | --buffered-input-test | --buffered-input-ignore-test | --session-input | --session-input-test | --session-input-ignore-test]\nSession test modes require a bound of at least 16 frames; all windows remain hidden.\n");
         return 2;
     }
     char *end = nullptr;
@@ -691,6 +768,9 @@ int main(int argc, char **argv) {
     if(sessionTest && frames<16) return 2;
     if(bufferedTest && frames<19) return 2;
     if(imguiTest && frames<22) return 2;
+    if(animationContract && (modeArgc!=5 || session)) return 2;
+    if(gearTest && (modeArgc!=5 || session || animationContract || !textures || freezeClip || cameraTest || frames<2 || present || std::string(argv[3])!="--textures")) return 2;
+    if(gearCleanupFault && !gearTest) return 2;
     setvbuf(stdout, nullptr, _IONBF, 0);
     @autoreleasepool {
         g_pOrbiter = new Orbiter;
@@ -713,6 +793,10 @@ int main(int argc, char **argv) {
             g_pOrbiter->SetFastExit(false);
             client = new CoreMetalClient(present, modeArgc == 5 ? argv[4] : "", engineCamera, freezeClip, materials, textures, textures && std::string(argv[3])=="--textures-ignore-sampling-test");
             client->platformInput=platformInput;
+            client->animationContract=animationContract;
+            client->gearTest=gearTest; client->gearFreeze=gearFreeze; client->gearSplit=unsigned(frames/2);
+            client->gearCleanupFault=gearCleanupFault;
+            if(gearCleanupFault) printf("[core-metal] DIAGNOSTIC: client-only detach validation fault; shared engine geometry unchanged\n");
             if(freezeClip) printf("[core-metal] DIAGNOSTIC NEGATIVE CONTROL: GPU clip frozen at frame 1; API camera still changes\n");
             attached = oapiRegisterGraphicsClient(client);
             if (!attached || !client->clbkInitialise()) throw std::runtime_error("graphics registration/init failed");
@@ -721,6 +805,8 @@ int main(int argc, char **argv) {
             if (!oapiGetFocusInterface()) throw std::runtime_error("no focus vessel");
             printf("[core-metal] focus=%s scenario=%s frames=%ld\n", oapiGetFocusInterface()->GetName(), argv[1], frames);
             client->attachFocusMesh();
+            if(animationContract) core_metal::probeAnimationContract(*client);
+            if(gearTest) client->setTestCamera(1);
             if(session) {
                 if(!g_pOrbiter->GetDInput()->GetKbdDevice()) throw std::runtime_error("native session has no actual keyboard device");
                 input=std::make_unique<core_metal::SessionInput>(client->windowID(),ignoreInput ? +[](unsigned,bool){} : (ignoreBuffer ? shim_set_key_state_only : shim_set_key),platformInput && !ignoreForward ? core_metal::processImGuiEvent : nullptr);
@@ -754,16 +840,19 @@ int main(int argc, char **argv) {
                 for(auto key:released) if(key) throw std::runtime_error("platform teardown left a held key");
                 printf("[core-metal] platform_session_destroyed actual_device_keys=all-released\n");
             }
-            client->detachFocusMesh();
-            g_pOrbiter->CloseSession();
+            bool cleanupOK=client->detachFocusMesh();
+            cleanupOK &= core_metal::cleanupStep("world close",[&]{g_pOrbiter->CloseSession(); printf("[core-metal] world_closed=1\n");});
             launched = false;
-            result = client->verified(executed) && controlsOK ? 0 : 1;
+            result = client->verified(executed) && controlsOK && cleanupOK ? 0 : 1;
         } catch (const std::exception &e) {
             fprintf(stderr,"[core-metal] FAIL: %s\n", e.what());
         }
         imguiProbe.reset();
         input.reset();
-        if (launched) { if(client) client->detachFocusMesh(); g_pOrbiter->CloseSession(); }
+        if (launched) {
+            if(client) client->detachFocusMesh(); // result is already FAIL on this path
+            core_metal::cleanupStep("world close",[&]{g_pOrbiter->CloseSession(); printf("[core-metal] world_closed=1\n");});
+        }
         if (client) client->report();
         if (attached && !oapiUnregisterGraphicsClient(client)) result = 1;
         delete client;
