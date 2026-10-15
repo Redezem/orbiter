@@ -58,6 +58,7 @@ struct ScenarioShip {
 
 struct ScenarioData {
 	ScenarioShip ship;
+	std::vector<ScenarioShip> ships;
 	std::string focus_name;
 	Vector3 camera_offset;
 	float camera_fov_degrees = 40.0f;
@@ -253,6 +254,7 @@ bool parse_scenario(const std::filesystem::path &path, ScenarioData &scenario, s
 	bool in_camera = false;
 	bool in_ships = false;
 	bool reading_ship = false;
+	std::vector<ScenarioShip> ships;
 	for (const std::string &raw_line : lines) {
 		const std::string line = strip_comment(raw_line);
 		if (line.empty()) {
@@ -306,8 +308,10 @@ bool parse_scenario(const std::filesystem::path &path, ScenarioData &scenario, s
 
 		if (!reading_ship && line.find(':') != std::string::npos) {
 			const size_t separator = line.find(':');
-			scenario.ship.name = trim(line.substr(0, separator));
-			scenario.ship.class_name = trim(line.substr(separator + 1));
+			ScenarioShip ship;
+			ship.name = trim(line.substr(0, separator));
+			ship.class_name = trim(line.substr(separator + 1));
+			ships.push_back(ship);
 			reading_ship = true;
 			continue;
 		}
@@ -321,26 +325,40 @@ bool parse_scenario(const std::filesystem::path &path, ScenarioData &scenario, s
 			continue;
 		}
 
+		ScenarioShip &ship = ships.back();
 		if (starts_with_ci(line, "POS ")) {
 			std::stringstream stream(line.substr(4));
-			stream >> scenario.ship.longitude_degrees >> scenario.ship.latitude_degrees;
+			stream >> ship.longitude_degrees >> ship.latitude_degrees;
 		} else if (starts_with_ci(line, "ALT ")) {
 			std::stringstream stream(line.substr(4));
-			stream >> scenario.ship.altitude_meters;
+			stream >> ship.altitude_meters;
 		} else if (starts_with_ci(line, "HEADING ")) {
 			std::stringstream stream(line.substr(8));
-			stream >> scenario.ship.heading_degrees;
+			stream >> ship.heading_degrees;
 		}
 	}
 
-	if (scenario.ship.name.empty() || scenario.ship.class_name.empty()) {
+	if (ships.empty()) {
 		error = "Scenario does not define a supported ship";
 		return false;
 	}
 
-	if (!scenario.focus_name.empty() && scenario.focus_name != scenario.ship.name) {
-		error = "Scenario focus ship is not available in the native bootstrap session";
-		return false;
+	// Pick the focused ship when the scenario names one; otherwise the first.
+	scenario.ships = std::move(ships);
+	scenario.ship = scenario.ships.front();
+	if (!scenario.focus_name.empty()) {
+		bool found = false;
+		for (const ScenarioShip &ship : scenario.ships) {
+			if (ship.name == scenario.focus_name) {
+				scenario.ship = ship;
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			error = "Scenario focus ship is not available in the native bootstrap session";
+			return false;
+		}
 	}
 
 	return true;
@@ -730,9 +748,31 @@ bool SimulationSession::initialize(const LaunchOptions &options, std::string &er
 
 	std::unordered_map<std::string, size_t> asset_lookup;
 
+	// Map the scenario's ship class onto a staged mesh. Classes without a
+	// known mesh fall back to the quadcopter so the session still runs.
+	const std::string vessel_class = scenario.ship.class_name;
+	const std::filesystem::path vessel_mesh_path = [&]() -> std::filesystem::path {
+		static const std::map<std::string, std::string> class_meshes = {
+			{"Quadcopter", "Meshes/Quadcopter/quadcopter.msh"},
+			{"ProjectAlpha_ISS", "Meshes/ISS/ProjectAlpha_ISS.msh"},
+			{"ISS", "Meshes/ISS/ProjectAlpha_ISS.msh"},
+			{"DG-S", "Meshes/DG/deltaglider.msh"},
+			{"DeltaGlider", "Meshes/DG/deltaglider.msh"},
+			{"Deltaglider", "Meshes/DG/deltaglider.msh"},
+			{"Atlantis", "Meshes/Atlantis/Atlantis.msh"},
+			{"ShuttleA", "Meshes/ShuttleA/ShuttleA.msh"},
+			{"ShuttlePB", "Meshes/ShuttlePB.msh"},
+			{"Wheel", "Meshes/Wheel.msh"},
+			{"Module1", "Meshes/Module1.msh"},
+			{"Module2", "Meshes/Module2.msh"},
+		};
+		const auto it = class_meshes.find(vessel_class);
+		const std::string relative =
+			it != class_meshes.end() ? it->second : "Meshes/Quadcopter/quadcopter.msh";
+		return options.content_root / relative;
+	}();
+
 	const size_t vessel_asset_index = [&]() -> size_t {
-		const std::filesystem::path vessel_mesh_path =
-			options.content_root / "Meshes" / "Quadcopter" / "quadcopter.msh";
 		LoadedMesh mesh;
 		std::string mesh_error;
 		if (!load_orbiter_mesh(vessel_mesh_path, mesh, mesh_error)) {
@@ -740,7 +780,7 @@ bool SimulationSession::initialize(const LaunchOptions &options, std::string &er
 			return static_cast<size_t>(-1);
 		}
 		const size_t asset_index = frame_scene_.assets.size();
-		frame_scene_.assets.push_back({"mesh:Quadcopter/quadcopter", std::move(mesh)});
+		frame_scene_.assets.push_back({"mesh:vessel:" + vessel_class, std::move(mesh)});
 		asset_lookup[frame_scene_.assets.back().id] = asset_index;
 		return asset_index;
 	}();

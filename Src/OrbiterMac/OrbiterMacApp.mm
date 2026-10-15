@@ -216,12 +216,16 @@ matrix_float4x4 model_matrix_for_instance(const orbiter::runtime::MeshInstance &
 		static_cast<float>(instance.position.x),
 		static_cast<float>(instance.position.y),
 		static_cast<float>(instance.position.z));
+	// Must match SimulationSession's rotate_euler_yxz: yaw first, then
+	// pitch, then roll (R = Rz(roll) * Rx(pitch) * Ry(yaw)). Composing in a
+	// different order renders the vessel at an attitude the physics never
+	// had, which reads as "flying diagonally" while tilting.
 	const matrix_float4x4 rotation =
 		matrix_multiply(
-			rotation_y_matrix(static_cast<float>(instance.rotation_degrees.y * kPi / 180.0)),
+			rotation_z_matrix(static_cast<float>(instance.rotation_degrees.z * kPi / 180.0)),
 			matrix_multiply(
 				rotation_x_matrix(static_cast<float>(instance.rotation_degrees.x * kPi / 180.0)),
-				rotation_z_matrix(static_cast<float>(instance.rotation_degrees.z * kPi / 180.0))));
+				rotation_y_matrix(static_cast<float>(instance.rotation_degrees.y * kPi / 180.0))));
 	const matrix_float4x4 scale = scale_matrix(
 		static_cast<float>(instance.scale.x),
 		static_cast<float>(instance.scale.y),
@@ -594,7 +598,14 @@ int run_app(const orbiter::runtime::LaunchOptions &options)
 		// HUD (ImGui) state for the live window only.
 		bool hud_ready = false;
 		bool hud_visible = true;
+		bool launcher_visible = false;
 		std::string imgui_ini_path;
+		char scenario_filter_buf[128] = {0};
+		std::vector<std::pair<std::string, std::filesystem::path>> scenario_list =
+			orbiter::runtime::discover_scenarios(options.content_root);
+		std::filesystem::path current_scenario = options.scenario_path;
+		bool scenario_switch_requested = false;
+		std::filesystem::path pending_scenario;
 
 		MTKTextureLoader *texture_loader = [[MTKTextureLoader alloc] initWithDevice:device];
 		std::vector<GpuMeshAsset> gpu_assets;
@@ -769,6 +780,10 @@ int run_app(const orbiter::runtime::LaunchOptions &options)
 					   !event.key.repeat &&
 					   event.key.scancode == SDL_SCANCODE_H) {
 					hud_visible = !hud_visible;
+				} else if (event.type == SDL_EVENT_KEY_DOWN &&
+					   !event.key.repeat &&
+					   event.key.scancode == SDL_SCANCODE_L) {
+					launcher_visible = !launcher_visible;
 				} else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
 					   event.button.button == SDL_BUTTON_LEFT &&
 					   !imgui_want_mouse) {
@@ -824,6 +839,27 @@ int run_app(const orbiter::runtime::LaunchOptions &options)
 			const double dt = std::max(0.001, static_cast<double>(now_ticks - previous_ticks) / 1000.0);
 			previous_ticks = now_ticks;
 			session->step(dt, input);
+
+			if (scenario_switch_requested) {
+				scenario_switch_requested = false;
+				std::string switch_error;
+				if (session->load_scenario(pending_scenario, switch_error)) {
+					current_scenario = pending_scenario;
+					std::string rebuild_error;
+					if (!build_gpu_mesh_assets(
+							device,
+							texture_loader,
+							options.content_root / "Textures",
+							session->frame_scene(),
+							gpu_assets,
+							rebuild_error)) {
+						std::cerr << "Scenario switch mesh rebuild failed: " << rebuild_error << '\n';
+					}
+				} else {
+					std::cerr << "Scenario switch failed: " << switch_error << '\n';
+				}
+			}
+
 			const orbiter::runtime::FrameScene &scene = session->frame_scene();
 			const orbiter::runtime::VesselState &vessel = session->focus_vessel();
 
@@ -889,7 +925,46 @@ int run_app(const orbiter::runtime::LaunchOptions &options)
 					ImGui::TextUnformatted("W/S thrust  A/D yaw  arrows pitch/roll");
 					ImGui::TextUnformatted("Space hover-hold  P pause  H toggle HUD");
 					ImGui::TextUnformatted("Drag mouse orbit camera  wheel zoom");
+					ImGui::TextUnformatted("L scenario launcher");
 					ImGui::End();
+
+					if (launcher_visible) {
+						ImGui::Begin("Scenarios");
+						ImGui::InputTextWithHint("Filter", "search scenarios...", scenario_filter_buf,
+						sizeof(scenario_filter_buf));
+						ImGui::Separator();
+						ImGui::BeginChild("scenario_list", ImVec2(0, 380), true);
+						const std::string lower_filter = [&]() {
+							std::string out = scenario_filter_buf;
+							std::transform(out.begin(), out.end(), out.begin(),
+								[](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+							return out;
+						}();
+						for (const auto &entry : scenario_list) {
+							if (!lower_filter.empty()) {
+								std::string lower_name = entry.first;
+								std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(),
+									[](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+								if (lower_name.find(lower_filter) == std::string::npos) {
+									continue;
+								}
+							}
+							const bool is_current = entry.second == current_scenario;
+							if (is_current) {
+								ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.9f, 1.0f, 1.0f));
+							}
+							if (ImGui::Selectable(entry.first.c_str(), is_current)) {
+								pending_scenario = entry.second;
+								scenario_switch_requested = true;
+							}
+							if (is_current) {
+								ImGui::PopStyleColor();
+							}
+						}
+						ImGui::EndChild();
+						ImGui::Text("%zu scenarios", scenario_list.size());
+						ImGui::End();
+					}
 
 					ImGui::Render();
 					ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), command_buffer, encoder);

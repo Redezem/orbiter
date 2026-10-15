@@ -191,4 +191,46 @@ std::unique_ptr<Session> create_session(const LaunchOptions &options, std::strin
 	return nullptr;
 }
 
+std::vector<std::pair<std::string, std::filesystem::path>> discover_scenarios(
+	const std::filesystem::path &content_root)
+{
+	std::vector<std::pair<std::string, std::filesystem::path>> found;
+
+	const std::filesystem::path scenarios_dir = content_root / "Scenarios";
+	std::error_code ec;
+	if (!std::filesystem::is_directory(scenarios_dir, ec)) {
+		return found;
+	}
+
+	for (const std::filesystem::directory_entry &entry :
+		std::filesystem::recursive_directory_iterator(scenarios_dir, ec)) {
+		if (!entry.is_regular_file(ec)) {
+			continue;
+		}
+		const std::filesystem::path &path = entry.path();
+		if (path.extension() != ".scn") {
+			continue;
+		}
+		const std::filesystem::path relative = std::filesystem::relative(path, scenarios_dir, ec);
+		std::string display;
+		for (const std::filesystem::path &part : relative) {
+			if (!display.empty()) {
+				display += " / ";
+			}
+			display += part.string();
+		}
+		if (display.size() > 4 && display.compare(display.size() - 4, 4, ".scn") == 0) {
+			display.erase(display.size() - 4);
+		}
+		found.emplace_back(display, path);
+	}
+
+	std::sort(found.begin(), found.end(),
+		[](const std::pair<std::string, std::filesystem::path> &a,
+		   const std::pair<std::string, std::filesystem::path> &b) {
+			return a.first < b.first;
+		});
+	return found;
+}
+
 } // namespace orbiter::runtime

@@ -16,6 +16,13 @@ public:
 	bool initialize(const orbiter::runtime::LaunchOptions &options, std::string &error);
 	void step(double dt_seconds, const orbiter::runtime::ControlInput &input) override;
 
+	bool load_scenario(const std::filesystem::path &scenario_path, std::string &error) override
+	{
+		orbiter::runtime::LaunchOptions next = options_;
+		next.scenario_path = scenario_path;
+		return initialize(next, error);
+	}
+
 	const orbiter::runtime::FrameScene &frame_scene() const override { return frame_scene_; }
 	const orbiter::runtime::VesselState &focus_vessel() const override { return vessel_state_; }
 	const std::vector<std::string> &warnings() const override { return warnings_; }

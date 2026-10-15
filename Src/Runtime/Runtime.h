@@ -149,12 +149,25 @@ public:
 	virtual const std::vector<std::string> &warnings() const = 0;
 	virtual double simulation_time() const = 0;
 	virtual bool paused() const = 0;
+
+	// Reload the session with a different scenario file. Backends that
+	// cannot hot-swap return false and set error.
+	virtual bool load_scenario(const std::filesystem::path &scenario_path, std::string &error)
+	{
+		error = "Scenario switching is not supported by this session backend";
+		return false;
+	}
 };
 
 LaunchOptions parse_launch_options(int argc, char **argv);
 std::string help_text(const char *executable_name);
 std::unique_ptr<Session> create_session(const LaunchOptions &options, std::string &error);
 const char *session_backend_name(SessionBackend backend);
+
+// All .scn files under content_root/Scenarios, sorted by display name
+// ("<folder> / <file>"). Empty if the directory is absent.
+std::vector<std::pair<std::string, std::filesystem::path>> discover_scenarios(
+	const std::filesystem::path &content_root);
 
 namespace detail {
 
