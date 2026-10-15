@@ -37,7 +37,7 @@ int DeltaGlider::Lua_InitInterpreter (void *context)
 	lua_State *L = (lua_State*)context;
 
 	// load atmospheric autopilot
-	luaL_dofile (L, "Script\\dg\\aap.lua");
+	luaL_dofile (L, "Script/dg/aap.lua");
 
 	return 0;
 }
@@ -115,7 +115,7 @@ Raise or lower the DeltaGliders gear.
 @function Gear
 @tparam bool action Whether to lower the gear.
 */
-static int dgGear (lua_State *L)
+int dgGear (lua_State *L)
 {
 	DeltaGlider *dg = lua_toDG (L, 1);
 	int action = lua_tointeger (L, 2);
@@ -129,7 +129,7 @@ Open or close the DeltaGliders nosecone.
 @function Nosecone
 @tparam bool action Whether to open the nosecode.
 */
-static int dgNosecone (lua_State *L)
+int dgNosecone (lua_State *L)
 {
 	DeltaGlider *dg = lua_toDG (L, 1);
 	int action = lua_tointeger (L, 2);
@@ -145,7 +145,7 @@ Open or close the DeltaGliders hatch.
 @function Hatch
 @tparam bool action Whether to open the hatch.
 */
-static int dgHatch (lua_State *L)
+int dgHatch (lua_State *L)
 {
 	DeltaGlider *dg = lua_toDG (L, 1);
 	int action = lua_tointeger (L, 2);
@@ -161,7 +161,7 @@ Open or close the DeltaGliders retro covers.
 @function Retro
 @tparam bool action Whether to open the retro covers.
 */
-static int dgRetro (lua_State *L)
+int dgRetro (lua_State *L)
 {
 	DeltaGlider *dg = lua_toDG (L, 1);
 	int action = lua_tointeger (L, 2);
@@ -177,7 +177,7 @@ Open or close the DeltaGliders outer airlock.
 @function OLock
 @tparam bool action Whether to to open the outer airlock.
 */
-static int dgOLock (lua_State *L)
+int dgOLock (lua_State *L)
 {
 	DeltaGlider *dg = lua_toDG (L, 1);
 	int action = lua_tointeger (L, 2);
@@ -193,7 +193,7 @@ Open or close the DeltaGliders inner airlock.
 @function ILock
 @tparam bool action Whether to open the outer airlock.
 */
-static int dgILock (lua_State *L)
+int dgILock (lua_State *L)
 {
 	DeltaGlider *dg = lua_toDG (L, 1);
 	int action = lua_tointeger (L, 2);
@@ -209,7 +209,7 @@ Open or close the DeltaGliders radiators.
 @function Radiator
 @tparam bool action Whether to open the radiators.
 */
-static int dgRadiator (lua_State *L)
+int dgRadiator (lua_State *L)
 {
 	DeltaGlider *dg = lua_toDG (L, 1);
 	int action = lua_tointeger (L, 2);
@@ -225,7 +225,7 @@ Extend or retract the DeltaGliders airbrake.
 @function ABrake
 @tparam bool action Whether to extend the airbrake
 */
-static int dgABrake (lua_State *L)
+int dgABrake (lua_State *L)
 {
 	DeltaGlider *dg = lua_toDG (L, 1);
 	int action = lua_tointeger (L, 2);

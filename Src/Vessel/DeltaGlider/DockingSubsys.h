@@ -25,6 +25,15 @@ class UndockCtrl;
 class EscapeLadderCtrl;
 class DocksealCtrl;
 
+// MSVC tolerates member declarations of classes introduced only by a later
+// friend declaration; clang requires the name to be visible first.
+class NoseconeLever;
+class NoseconeIndicator;
+class UndockLever;
+class LadderSwitch;
+class LadderIndicator;
+class DocksealIndicator;
+
 class DockingCtrlSubsystem: public DGSubsystem {
 public:
 	DockingCtrlSubsystem (DeltaGlider *v);

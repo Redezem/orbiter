@@ -5,6 +5,9 @@
 #include <fstream>
 #include <stdio.h>
 #include <time.h>
+#ifndef _WIN32
+#include <direct.h>   // port shim: _fullpath
+#endif
 #include "Mesh.h"
 
 using namespace std;

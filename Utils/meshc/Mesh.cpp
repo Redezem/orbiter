@@ -544,6 +544,9 @@ void Mesh::ReleaseTextures ()
 	}
 }
 
+#ifdef _WIN32
+// Legacy Direct3D-7 debug renderer; not used by meshc and not available on
+// the macOS port, which renders meshes through the native graphics client.
 DWORD Mesh::Render (LPDIRECT3DDEVICE7 dev)
 {
 	DWORD i, mi, pmi, ti, pti, zb = 0, gcount = 0, wrap, owrap = 0;
@@ -597,6 +600,7 @@ DWORD Mesh::Render (LPDIRECT3DDEVICE7 dev)
 
 	return gcount;
 }
+#endif // _WIN32 (Mesh::Render)
 
 istream &operator>> (istream &is, Mesh &mesh)
 {

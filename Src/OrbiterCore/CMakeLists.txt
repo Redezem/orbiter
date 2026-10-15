@@ -121,6 +121,10 @@ set(ORB_CORE_SRC
 	# macOS input bridge backing the DirectInput shim
 	${CMAKE_CURRENT_SOURCE_DIR}/shim/shim_input.cpp
 
+	# Fallbacks for the Win32 custom-control library (DlgCtrl gauge/switch
+	# entry points that vessel modules reference; inert on the native port)
+	${CMAKE_CURRENT_SOURCE_DIR}/shim/shim_dlgctrl.cpp
+
 	# Graphics utils (engine-side helpers shared with clients)
 	${CMAKE_SOURCE_DIR}/Src/Orbiter/D3d7util.cpp
 	${CMAKE_SOURCE_DIR}/Src/Orbiter/D3dmath.cpp

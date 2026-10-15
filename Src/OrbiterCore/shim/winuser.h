@@ -825,6 +825,24 @@ inline INT_PTR DialogBoxParamA(HINSTANCE inst, LPCSTR tmpl, HWND parent, DLGPROC
 }
 inline bool EndDialog(HWND hDlg, INT_PTR result) { (void)hDlg; (void)result; return true; }
 inline HWND GetDlgItem(HWND hDlg, int item) { (void)hDlg; (void)item; return nullptr; }
+inline int GetDlgCtrlID(HWND hwnd) { (void)hwnd; return 0; }
+inline LRESULT SendDlgItemMessageA(HWND hDlg, int item, UINT msg, WPARAM wp, LPARAM lp)
+{
+	(void)hDlg; (void)item; (void)msg; (void)wp; (void)lp;
+	return 0;
+}
+#ifndef SendDlgItemMessage
+#define SendDlgItemMessage SendDlgItemMessageA
+#endif
+#ifndef SB_THUMBTRACK
+#define SB_THUMBTRACK 5
+#endif
+#ifndef SB_LINELEFT
+#define SB_LINELEFT 0
+#endif
+#ifndef SB_LINERIGHT
+#define SB_LINERIGHT 1
+#endif
 inline bool DestroyWindow2(HWND h) { (void)h; return true; }
 inline int MessageBoxA(HWND hwnd, LPCSTR text, LPCSTR caption, UINT type)
 {

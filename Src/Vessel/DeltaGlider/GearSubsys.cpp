@@ -17,6 +17,13 @@
 #include "meshres_p0.h"
 #include "dg_vc_anim.h"
 
+#ifndef _WIN32
+// MSVC spelling used by the engine sources
+#include <string.h>
+static inline int _stricmp (const char *a, const char *b) { return strcasecmp (a, b); }
+static inline int _strnicmp (const char *a, const char *b, size_t n) { return strncasecmp (a, b, n); }
+#endif
+
 // ==============================================================
 // Landing gear subsystem
 // ==============================================================

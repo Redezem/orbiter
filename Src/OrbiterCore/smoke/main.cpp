@@ -70,9 +70,18 @@ int main (int argc, char **argv)
 	bool have_alt = oapiGetFocusAltitude(&alt);
 	oapiGetGroundspeed((OBJHANDLE)v, &gs);
 
+	// Surface quantities are undefined in orbit; fall back to orbital state.
+	double peri = 0, apo = 0;
+	bool have_orbit = (v->GetPeDist(peri) && v->GetApDist(apo)) != 0;
+	double rv_mag = sqrt(vs.rpos.x*vs.rpos.x + vs.rpos.y*vs.rpos.y + vs.rpos.z*vs.rpos.z);
+	double vel_mag = sqrt(vs.rvel.x*vs.rvel.x + vs.rvel.y*vs.rvel.y + vs.rvel.z*vs.rvel.z);
+
 	printf("[smoke] focus vessel: %s (%s)\n", v->GetName(), v->GetClassName());
 	printf("[smoke] alt=%s%.1f m  groundspeed=%.1f m/s  eng_main=%.2f\n",
 		have_alt ? "" : "?", alt, gs, vs.eng_main);
+	if (have_orbit)
+		printf("[smoke] orbit: peri=%.1f km  apo=%.1f km  |r|=%.1f km  |v|=%.1f m/s\n",
+			peri/1000.0, apo/1000.0, rv_mag/1000.0, vel_mag);
 
 	// Save the resulting state as a scenario file
 	bool saved = g_pOrbiter->SaveScenario("SmokeSaved", "smoke harness", 2);

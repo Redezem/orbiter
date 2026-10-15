@@ -46,3 +46,86 @@ set_target_properties(Quadcopter PROPERTIES
 # they live in the host executable, which exports them via -force_load.
 # Resolve them dynamically at dlopen time.
 target_link_options(Quadcopter PRIVATE -undefined dynamic_lookup)
+
+# meshc: mesh label scanner used to generate vessel meshres headers
+add_executable(meshc
+	${CMAKE_SOURCE_DIR}/Utils/meshc/meshc.cpp
+	${CMAKE_SOURCE_DIR}/Utils/meshc/Mesh.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/D3dmath.cpp
+)
+target_include_directories(meshc PRIVATE
+	${CMAKE_SOURCE_DIR}/Utils/meshc
+	${CMAKE_SOURCE_DIR}/Src/Orbiter            # D3dmath.h, Vecmat.h
+	${CMAKE_SOURCE_DIR}/Src/OrbiterCore/shim   # d3d.h types for Mesh.h
+	${CMAKE_SOURCE_DIR}/Orbitersdk/include     # OrbiterPlatform.h for the shim
+)
+
+# DeltaGlider — the flagship vessel module (needs meshc-generated headers)
+set(DG_SRC_DIR ${CMAKE_SOURCE_DIR}/Src/Vessel/DeltaGlider)
+foreach (spec "deltaglider:-" "deltaglider_vc:_VC" "dg_2dpanel0:_P0" "dg_2dpanel1:_P1")
+	string(REPLACE ":" ";" spec_parts ${spec})
+	list(GET spec_parts 0 msh)
+	list(GET spec_parts 1 suffix)
+	if (suffix STREQUAL "-")
+		set(out meshres.h)
+	else()
+		set(out meshres${suffix}.h)
+	endif()
+	add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${out}
+		COMMAND $<TARGET_FILE:meshc> /I ${DG_SRC_DIR}/Meshes/${msh}.msh /P ${suffix} /O ${CMAKE_CURRENT_BINARY_DIR}/${out}
+		DEPENDS ${DG_SRC_DIR}/Meshes/${msh}.msh meshc
+	)
+endforeach()
+
+# Anchor the generated headers to a target so the custom commands run
+add_custom_target(DeltaGlider_Prerequisites
+	DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/meshres.h
+	        ${CMAKE_CURRENT_BINARY_DIR}/meshres_VC.h
+	        ${CMAKE_CURRENT_BINARY_DIR}/meshres_P0.h
+	        ${CMAKE_CURRENT_BINARY_DIR}/meshres_P1.h
+)
+
+add_library(DeltaGlider SHARED
+	${DG_SRC_DIR}/DeltaGlider.cpp
+	${DG_SRC_DIR}/DGLua.cpp
+	${DG_SRC_DIR}/AAPSubsys.cpp
+	${DG_SRC_DIR}/AerodynSubsys.cpp
+	${DG_SRC_DIR}/AvionicsSubsys.cpp
+	${DG_SRC_DIR}/DGSubsys.cpp
+	${DG_SRC_DIR}/DockingSubsys.cpp
+	${DG_SRC_DIR}/FailureSubsys.cpp
+	${DG_SRC_DIR}/GearSubsys.cpp
+	${DG_SRC_DIR}/HoverSubsys.cpp
+	${DG_SRC_DIR}/HudCtrl.cpp
+	${DG_SRC_DIR}/LightSubsys.cpp
+	${DG_SRC_DIR}/MainRetroSubsys.cpp
+	${DG_SRC_DIR}/MfdSubsys.cpp
+	${DG_SRC_DIR}/PressureSubsys.cpp
+	${DG_SRC_DIR}/RcsSubsys.cpp
+	${DG_SRC_DIR}/ScramSubsys.cpp
+	${DG_SRC_DIR}/ThermalSubsys.cpp
+	${DG_SRC_DIR}/DGSwitches.cpp
+	${DG_SRC_DIR}/FuelMfd.cpp
+	${DG_SRC_DIR}/Horizon.cpp
+	${DG_SRC_DIR}/InstrAoa.cpp
+	${DG_SRC_DIR}/InstrHsi.cpp
+	${DG_SRC_DIR}/InstrVs.cpp
+	${DG_SRC_DIR}/MomentInd.cpp
+	${CMAKE_SOURCE_DIR}/Src/Vessel/Common/Instrument.cpp
+)
+target_include_directories(DeltaGlider PRIVATE
+	${CMAKE_SOURCE_DIR}/Orbitersdk/include
+	${CMAKE_SOURCE_DIR}/Src/OrbiterCore/shim   # Win32 types for the scenario-editor interface
+	${CMAKE_SOURCE_DIR}/Src/Vessel/Common
+	${CMAKE_SOURCE_DIR}/Src/Plugin/ScnEditor   # ScnEditorAPI.h
+	${DG_SRC_DIR}
+	${CMAKE_CURRENT_BINARY_DIR}
+	${ORB_IMGUI_SRC}
+)
+target_link_libraries(DeltaGlider PRIVATE orb-lua)
+add_dependencies(DeltaGlider DeltaGlider_Prerequisites)
+target_link_options(DeltaGlider PRIVATE -undefined dynamic_lookup)
+set_target_properties(DeltaGlider PROPERTIES
+	LIBRARY_OUTPUT_DIRECTORY ${ORB_MODULE_DIR}
+	PREFIX ""
+)

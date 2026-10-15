@@ -636,6 +636,7 @@ inline HMODULE LoadLibraryA(const char *name)
 			h = dlopen(alt, RTLD_NOW | RTLD_LOCAL);
 		}
 	}
+	if (!h) fprintf(stderr, "[shim] dlopen failed for '%s': %s\n", name, dlerror());
 	return h;
 }
 inline HMODULE LoadLibraryW(const WCHAR *name) { return LoadLibraryA((const char *)name); }

@@ -23,6 +23,22 @@
 #include "InstrHsi.h"
 #include "meshres_p0.h"
 
+#ifndef _WIN32
+// MSVC spelling used by the engine sources
+#include <string.h>
+#include <stdarg.h>
+static inline int _stricmp (const char *a, const char *b) { return strcasecmp (a, b); }
+static inline int _strnicmp (const char *a, const char *b, size_t n) { return strncasecmp (a, b, n); }
+static inline int sprintf_s (char *buf, size_t n, const char *fmt, ...) __attribute__((format(printf,3,4)));
+static inline int sprintf_s (char *buf, size_t n, const char *fmt, ...)
+{
+	va_list ap; va_start (ap, fmt);
+	int r = vsnprintf (buf, n, fmt, ap);
+	va_end (ap);
+	return r;
+}
+#endif
+
 using std::min;
 using std::max;
 

@@ -16,6 +16,12 @@
 #include "DGSwitches.h"
 #include "DGSubsys.h"
 
+// MSVC tolerates member declarations of classes introduced only by a
+// later friend declaration; clang requires the name to be visible first.
+class AerodynSelectorDial;
+class AirbrakeLever;
+class ElevatorTrimWheel;
+
 // ==============================================================
 // Aerodynamic control subsystem
 // ==============================================================

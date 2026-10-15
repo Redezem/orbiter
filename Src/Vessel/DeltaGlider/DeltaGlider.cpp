@@ -37,6 +37,12 @@
 #include <math.h>
 #include <time.h>
 #include "OrbiterSDK.h"
+#ifndef _WIN32
+// The scenario-editor interface below is a Win32 construct; the port shim
+// provides the message/dialog types it references.
+#include <windows.h>
+#include <winuser.h>
+#endif
 #include <imgui.h>
 
 using std::min;

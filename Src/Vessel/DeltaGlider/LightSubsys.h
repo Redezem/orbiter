@@ -16,6 +16,16 @@
 #include "DGSwitches.h"
 #include "DGSubsys.h"
 
+// MSVC tolerates member declarations of classes introduced only by a
+// later friend declaration; clang requires the name to be visible first.
+class InstrumentLightSwitch;
+class InstrumentBrightnessDial;
+class CockpitLightSwitch;
+class CockpitBrightnessDial;
+class LandDockLightSwitch;
+class StrobeLightSwitch;
+class NavLightSwitch;
+
 // ==============================================================
 // Light control subsystem
 // ==============================================================

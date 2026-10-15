@@ -17,6 +17,11 @@
 #include "DGSwitches.h"
 #include <vector>
 
+// MSVC tolerates member declarations of classes introduced only by a
+// later friend declaration; clang requires the name to be visible first.
+class HoverHoldAltIndicator;
+class HoverThrottle;
+
 // ==============================================================
 // Hover control subsystem
 // ==============================================================

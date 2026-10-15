@@ -15,6 +15,15 @@
 #include "DGSubsys.h"
 #include "DGSwitches.h"
 
+// MSVC tolerates member declarations of classes introduced only by a
+// later friend declaration; clang requires the name to be visible first.
+class CoolantLoop;
+class CoolantLoopDisplay;
+class CoolantPumpSwitch;
+class CoolantPumpDial;
+class CoolantReftempDial;
+class RadiatorSwitch;
+
 // ==============================================================
 // Thermal control subsystem
 // ==============================================================
