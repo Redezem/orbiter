@@ -13,6 +13,12 @@
 #include "Instrument.h"
 #include "Orbitersdk.h"
 
+#ifndef _WIN32
+// MSVC spelling used by the engine sources
+#include <string.h>
+static inline int _strnicmp (const char *a, const char *b, size_t n) { return strncasecmp (a, b, n); }
+#endif
+
 PanelElement::PanelElement (VESSEL3 *v)
 {
 	vessel = v;

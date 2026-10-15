@@ -28,6 +28,10 @@ extern Pane *g_pane;
 
 using namespace oapi;
 
+// Defined in Orbiter.cpp at global scope; declared here at file scope so
+// member-function lookups don't accidentally declare it inside namespace oapi.
+extern const TCHAR *g_strAppTitle;
+
 const char *strWndClass = "Orbiter Render Window";
 
 OAPIFUNC LRESULT CALLBACK WndProc (HWND, UINT, WPARAM, LPARAM);
@@ -88,10 +92,14 @@ bool GraphicsClient::clbkInitialise ()
 		NULL, strWndClass};
     RegisterClass (&wndClass);
 
+#ifdef ORBITER_NO_WIN32_SHELL
+	hVid = NULL; // no Win32 launchpad video tab on the macOS core
+#else
 	if (clbkUseLaunchpadVideoTab() && g_pOrbiter->Launchpad()) {
 		hVid = g_pOrbiter->Launchpad()->GetTab(PG_VID)->TabWnd();
 		SetWindowLongPtr (hVid, GWLP_USERDATA, (LONG_PTR)this);
 	} else hVid = NULL;
+#endif
 
 	// set default parameters from config data
 	Config *cfg = g_pOrbiter->Cfg();
@@ -107,9 +115,11 @@ bool GraphicsClient::clbkInitialise ()
 	VideoData.winw       = (int)cfg->CfgDevPrm.WinW;
 	VideoData.winh       = (int)cfg->CfgDevPrm.WinH;
 
+#ifndef ORBITER_NO_WIN32_SHELL
 	char fname[256];
 	GetModuleFileName(hModule, fname, 256);
 	((orbiter::DefVideoTab*)g_pOrbiter->Launchpad()->GetTab(PG_VID))->OnGraphicsClientLoaded(this, fname);
+#endif
 
 	return true;
 }
@@ -656,7 +666,6 @@ HWND GraphicsClient::InitRenderWnd (HWND hWnd)
 	// store class instance with window for access in the message handler
 
 	char title[256], cbuf[128];
-	extern const TCHAR *g_strAppTitle;
 	strcpy (title, g_strAppTitle);
 	GetWindowText (hWnd, cbuf, 128);
 	if (cbuf[0]) {

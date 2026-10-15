@@ -3,6 +3,17 @@
 # handful of Win32 function calls the engine makes (timeGetTime, GetLastError,
 # MAX_PATH, ...). Win32 *types* are already provided by OrbiterPlatform.h.
 
+# Resolve the actual FetchContent source trees (imgui_SOURCE_DIR may point at
+# the Extern staging dir which only holds headers).
+set(ORB_IMGUI_SRC ${imgui_SOURCE_DIR})
+if(NOT EXISTS ${ORB_IMGUI_SRC}/imgui.cpp)
+	set(ORB_IMGUI_SRC ${FETCHCONTENT_BASE_DIR}/imgui-src)
+endif()
+set(ORB_IMPLOT_SRC ${implot_SOURCE_DIR})
+if(NOT EXISTS ${ORB_IMPLOT_SRC}/implot.cpp)
+	set(ORB_IMPLOT_SRC ${FETCHCONTENT_BASE_DIR}/implot-src)
+endif()
+
 set(ORB_CORE_SRC
 	# Math / astronomy / time
 	${CMAKE_SOURCE_DIR}/Src/Orbiter/Vecmat.cpp
@@ -123,6 +134,17 @@ set(ORB_CORE_SRC
 	${CMAKE_SOURCE_DIR}/Src/Orbiter/MFDAPI.cpp
 	${CMAKE_SOURCE_DIR}/Src/Orbiter/CelSphereAPI.cpp
 	${CMAKE_SOURCE_DIR}/Src/Orbiter/CamAPI.cpp
+
+	# ImGui + ImPlot implementation (imgui/implot targets are INTERFACE-only;
+	# the engine archive needs the actual sources). imgui_SOURCE_DIR may point
+	# at the Extern staging dir, so resolve the FetchContent source tree.
+	${ORB_IMGUI_SRC}/imgui.cpp
+	${ORB_IMGUI_SRC}/imgui_draw.cpp
+	${ORB_IMGUI_SRC}/imgui_tables.cpp
+	${ORB_IMGUI_SRC}/imgui_widgets.cpp
+	${ORB_IMGUI_SRC}/misc/cpp/imgui_stdlib.cpp
+	${ORB_IMPLOT_SRC}/implot.cpp
+	${ORB_IMPLOT_SRC}/implot_items.cpp
 )
 
 add_library(OrbiterCore STATIC ${ORB_CORE_SRC})
@@ -149,8 +171,39 @@ target_include_directories(OrbiterCore PRIVATE
 
 target_link_libraries(OrbiterCore PRIVATE
 	OrbiterPlatformRuntime
-	Orbitersdk
 	imgui
 	implot
 	zlib
 )
+
+# Headless engine smoke harness: links the whole OrbiterCore archive and
+# runs the real engine lifecycle with no graphics client.
+add_executable(orbiter-core-smoke ${CMAKE_CURRENT_SOURCE_DIR}/smoke/main.cpp)
+target_compile_definitions(orbiter-core-smoke PRIVATE ORBITER_NO_WIN32_SHELL)
+target_include_directories(orbiter-core-smoke PRIVATE
+	${CMAKE_CURRENT_SOURCE_DIR}/shim
+	${CMAKE_SOURCE_DIR}/Src/Orbiter
+	${CMAKE_SOURCE_DIR}/Orbitersdk/include
+	${CMAKE_SOURCE_DIR}/OVP
+	${CMAKE_SOURCE_DIR}/Src/Platform
+	${imgui_SOURCE_DIR}
+	${implot_SOURCE_DIR}
+	${TRACY_CLIENT_INCLUDE}
+)
+target_link_libraries(orbiter-core-smoke PRIVATE
+	-Wl,-force_load,$<TARGET_FILE:OrbiterCore>
+	OrbiterCore
+	OrbiterPlatformRuntime
+	zlib
+)
+
+# dlopen'd vessel modules resolve @rpath dependencies against the CWD
+# (the content root) and the executable's directory.
+target_link_options(orbiter-core-smoke PRIVATE
+	-Wl,-rpath,.
+	-Wl,-rpath,@executable_path
+)
+
+# Native vessel modules (real Src/Vessel sources built as .dylib against the
+# engine host's exported symbols)
+add_subdirectory(modules)

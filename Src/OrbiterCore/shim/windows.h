@@ -617,14 +617,31 @@ inline bool GetCursorPos(POINT *pt)
 inline bool SetCursorPos(int x, int y) { (void)x; (void)y; return true; }
 inline void ScreenToClient(HWND hwnd, POINT *pt) { (void)hwnd; (void)pt; }
 
-// Dynamic module loading: the macOS host loads modules via dlopen through
-// the platform runtime; engine code paths that call the Win32 API directly
-// get no-op stubs so the core compiles unchanged.
-inline HMODULE LoadLibraryA(const char *name) { (void)name; return nullptr; }
-inline HMODULE LoadLibraryW(const WCHAR *name) { (void)name; return nullptr; }
-inline HMODULE LoadLibrary(const char *name) { (void)name; return nullptr; }
-inline void *GetProcAddress(HMODULE hmod, const char *name) { (void)hmod; (void)name; return nullptr; }
-inline bool FreeLibrary(HMODULE hmod) { (void)hmod; return false; }
+// Dynamic module loading: mapped onto the real POSIX loader so engine code
+// paths that call the Win32 API directly (Vessel::RegisterModule,
+// CelestialBody::RegisterModule, Script module loading) actually load native
+// .dylib modules. Legacy ".dll" names are translated to ".dylib".
+#include <dlfcn.h>
+inline HMODULE LoadLibraryA(const char *name)
+{
+	if (!name) return nullptr;
+	HMODULE h = dlopen(name, RTLD_NOW | RTLD_LOCAL);
+	if (!h) {
+		char alt[512];
+		size_t n = strlen(name);
+		if (n >= 4 && strcmp(name + n - 4, ".dll") == 0) {
+			strncpy(alt, name, n - 4);
+			alt[n - 4] = '\0';
+			strcat(alt, ".dylib");
+			h = dlopen(alt, RTLD_NOW | RTLD_LOCAL);
+		}
+	}
+	return h;
+}
+inline HMODULE LoadLibraryW(const WCHAR *name) { return LoadLibraryA((const char *)name); }
+inline HMODULE LoadLibrary(const char *name) { return LoadLibraryA(name); }
+inline void *GetProcAddress(HMODULE hmod, const char *name) { return hmod ? dlsym(hmod, name) : nullptr; }
+inline bool FreeLibrary(HMODULE hmod) { return hmod ? (dlclose(hmod) == 0) : false; }
 
 // MSVC secure CRT: map to the portable equivalents.
 inline int fopen_s(FILE **fp, const char *filename, const char *mode)

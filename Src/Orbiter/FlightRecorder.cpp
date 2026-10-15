@@ -360,7 +360,7 @@ bool Vessel::FRecorder_Read (const char *scname)
 	char fname[256], cbuf[256];
 
 	for (i = strlen(scname)-1; i > 0; i--)
-		if (scname[i-1] == '\\') break;
+		if (scname[i-1] == '\\' || scname[i-1] == '/') break;
 	sprintf (fname, "Flights/%s/%s.pos", scname+i, name.c_str());
 
 	ifstream ifs (fname);
@@ -796,7 +796,7 @@ void Orbiter::FRecorder_Activate (bool active, const char *fname, bool append)
 		if (!append) FRecorder_Reset();
 		bRecord = true;
 		char cbuf[256];
-		sprintf (cbuf, "Flights\\%s\\system.dat", fname);
+		sprintf (cbuf, "Flights/%s/system.dat", fname);
 		if (FRsysname) delete []FRsysname;
 		FRsysname = new char[strlen(cbuf)+1]; TRACENEW
 		strcpy (FRsysname, cbuf);
@@ -821,8 +821,8 @@ void Orbiter::FRecorder_OpenPlayback (const char *scname)
 	if (FRsys_stream) delete FRsys_stream;
 
 	for (i = strlen(scname)-1; i > 0; i--)
-		if (scname[i-1] == '\\') break;
-	sprintf (cbuf, "Flights\\%s\\system.dat", scname+i);
+		if (scname[i-1] == '\\' || scname[i-1] == '/') break;
+	sprintf (cbuf, "Flights/%s/system.dat", scname+i);
 	if (FRsysname) delete []FRsysname;
 	FRsysname = new char[strlen(cbuf)+1]; TRACENEW
 	strcpy (FRsysname, cbuf);

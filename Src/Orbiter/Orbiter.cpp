@@ -176,6 +176,7 @@ int _matherr(struct _exception *except )
 // Application entry containing message loop
 
 
+#ifndef ORBITER_NO_WIN32_SHELL
 INT WINAPI WinMain (HINSTANCE hInstance, HINSTANCE, LPSTR strCmdLine, INT nCmdShow)
 {
 #ifdef _CRTDBG_MAP_ALLOC
@@ -230,6 +231,7 @@ INT WINAPI WinMain (HINSTANCE hInstance, HINSTANCE, LPSTR strCmdLine, INT nCmdSh
 	delete g_pOrbiter;
 	return 0;
 }
+#endif // ORBITER_NO_WIN32_SHELL
 
 void SetEnvironmentVars ()
 {
@@ -464,10 +466,10 @@ HRESULT Orbiter::Create (HINSTANCE hInstance)
 	script = new ScriptInterface(this); TRACENEW
 
 	// preload modules from command line requests
-	LoadModules("Modules\\Plugin", pConfig->CfgCmdlinePrm.LoadPlugins);
+	LoadModules("Modules/Plugin", pConfig->CfgCmdlinePrm.LoadPlugins);
 
 	// preload active plugin modules
-	LoadModules("Modules\\Plugin", pConfig->GetActiveModules());
+	LoadModules("Modules/Plugin", pConfig->GetActiveModules());
 
 	// preload startup plugin modules
 	LoadStartupModules();
@@ -529,7 +531,9 @@ VOID Orbiter::CloseApp (bool fast_shutdown)
 			delete []customcmd;
 			customcmd = NULL;
 		}
+#ifndef ORBITER_NO_WIN32_SHELL
 		oapiUnregisterCustomControls (hInst);
+#endif
 	}
 	timeEndPeriod (1);
 }
@@ -594,7 +598,7 @@ void Orbiter::LoadModules(const std::string& path)
 //-----------------------------------------------------------------------------
 void Orbiter::LoadStartupModules()
 {
-	LoadModules("Modules\\Startup");
+	LoadModules("Modules/Startup"); // native separator; fs::path handles both
 }
 
 //-----------------------------------------------------------------------------
@@ -1538,8 +1542,8 @@ VOID Orbiter::Quicksave ()
 	char desc[256], fname[256];
 	sprintf (desc, "Orbiter saved state at T = %0.0f", td.SimT0);
 	for (i = strlen(ScenarioName)-1; i > 0; i--)
-		if (ScenarioName[i-1] == '\\') break;
-	sprintf (fname, "Quicksave\\%s %04d", ScenarioName+i, ++g_qsaveid);
+		if (ScenarioName[i-1] == '\\' || ScenarioName[i-1] == '/') break;
+	sprintf (fname, "Quicksave/%s %04d", ScenarioName+i, ++g_qsaveid);
 	if(SaveScenario (fname, desc, 0))
 		oapiAddNotification(OAPINOTIF_SUCCESS, "Scenario saved successfully", fname);
 	else

@@ -32,6 +32,14 @@ double rand1()
 	return (double)rand()*irmax;
 }
 
+void NormalizePathSeparators (char *path)
+{
+#ifndef _WIN32
+	for (char *p = path; *p; p++)
+		if (*p == '\\') *p = '/';
+#endif
+}
+
 bool MakePath (const char *fname)
 {
 	char cbuf[256];

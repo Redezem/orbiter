@@ -1,0 +1,90 @@
+// Path B smoke harness: run the REAL Orbiter engine core headlessly on
+// macOS — no graphics client, no Win32 shell. Exercises the engine
+// lifecycle: config load, scenario launch, world init, simulation frames,
+// state readback through the public API, scenario save, clean close.
+//
+// Usage: orbiter-core-smoke <scenario-name> [frames]
+//   run from the Orbiter content root (Config/, Textures/, Scenarios/ ...)
+
+#include <cstdio>
+#include <cstring>
+#include <cstdlib>
+
+#include <windows.h>   // portability shim layer (must precede engine headers)
+#include "Orbiter.h"
+#include "Psys.h"
+#include "Vessel.h"
+#include "Celbody.h"
+#include "OrbiterAPI.h"
+#include "cmdline.h"
+
+extern Orbiter *g_pOrbiter;
+
+int main (int argc, char **argv)
+{
+	const char *scenario = (argc > 1) ? argv[1] : "Demo/Tutorial 1";
+	int frames = (argc > 2) ? atoi(argv[2]) : 120;
+
+	printf("[smoke] scenario='%s' frames=%d\n", scenario, frames);
+
+	g_pOrbiter = new Orbiter;
+
+	// Parse a command line that forces the scenario (bypasses launchpad)
+	char cmdline[512];
+	snprintf(cmdline, sizeof(cmdline), "--scenariox=\"%s\"", scenario);
+	orbiter::CommandLine::Parse(g_pOrbiter, cmdline);
+
+	INITLOG("Orbiter_smoke.log", false);
+
+	if (g_pOrbiter->Create(NULL) != S_OK) {
+		printf("[smoke] FAIL: Orbiter::Create\n");
+		return 2;
+	}
+	printf("[smoke] Create OK\n");
+
+	// Launch the scenario (creates session; no gclient -> headless)
+	g_pOrbiter->Launch(scenario);
+
+	if (!oapiGetFocusInterface()) {
+		printf("[smoke] FAIL: session/focus not created\n");
+		return 3;
+	}
+	printf("[smoke] session OK\n");
+
+	// Step the world headlessly
+	for (int i = 0; i < frames; i++)
+		g_pOrbiter->SingleFrame();
+	printf("[smoke] %d frames stepped\n", frames);
+
+	// Read back state through the public API
+	VESSEL *v = oapiGetFocusInterface();
+	if (!v) {
+		printf("[smoke] FAIL: no focus vessel\n");
+		return 4;
+	}
+	VESSELSTATUS vs;
+	memset(&vs, 0, sizeof(vs));
+	v->GetStatus(vs);
+
+	double alt = 0, gs = 0;
+	bool have_alt = oapiGetFocusAltitude(&alt);
+	oapiGetGroundspeed((OBJHANDLE)v, &gs);
+
+	printf("[smoke] focus vessel: %s (%s)\n", v->GetName(), v->GetClassName());
+	printf("[smoke] alt=%s%.1f m  groundspeed=%.1f m/s  eng_main=%.2f\n",
+		have_alt ? "" : "?", alt, gs, vs.eng_main);
+
+	// Save the resulting state as a scenario file
+	bool saved = g_pOrbiter->SaveScenario("SmokeSaved", "smoke harness", 2);
+	printf("[smoke] SaveScenario %s\n", saved ? "OK" : "FAIL");
+
+	// Clean close
+	g_pOrbiter->CloseSession();
+	printf("[smoke] CloseSession OK\n");
+
+	delete g_pOrbiter;
+	g_pOrbiter = NULL;
+
+	printf("[smoke] PASS\n");
+	return saved ? 0 : 5;
+}

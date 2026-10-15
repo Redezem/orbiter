@@ -70,7 +70,7 @@ CelestialBody::CelestialBody (char *fname)
 
 	if (GetItemString(ifs, "GravModelPath", cbuf) && GetItemInt(ifs, "GravCoeffCutoff", gravcoeff)) {
 		char gravModelFileName[512];
-		sprintf(gravModelFileName, "GravityModels\\%s",cbuf);
+		sprintf(gravModelFileName, "GravityModels/%s", cbuf);
 		int maxGravityTerms = 0;
 		int	actualLoadedTerms = 0;
 		int readResult = 0;
@@ -716,10 +716,10 @@ void CelestialBody::RegisterModule (char *dllname)
 	char cbuf[256];
 	module = 0;                              // reset new interface
 	memset (&modIntf, 0, sizeof (modIntf));  // reset old interface
-	sprintf (cbuf, "Modules\\Celbody\\%s.dll", dllname); // try new module location
+	sprintf (cbuf, "Modules/Celbody/%s.dll", dllname); // try new module location
 	hMod = LoadLibrary (cbuf);
 	if (!hMod) {
-		sprintf (cbuf, "Modules\\%s.dll", dllname);  // try legacy module location
+		sprintf (cbuf, "Modules/%s.dll", dllname);  // try legacy module location
 		hMod = LoadLibrary (cbuf);
 	}
 	if (!hMod) return;
@@ -893,7 +893,7 @@ void CELBODY2::clbkInit (FILEHANDLE cfg)
 		// 1: try Config\<Name>\Atmosphere.cfg for interactive setting
 		char fname[256], name[256];
 		oapiGetObjectName (hBody, name, 256);
-		strcat (name, "\\Atmosphere.cfg");
+		strcat (name, "/Atmosphere.cfg");
 		FILEHANDLE hFile = oapiOpenFile (name, FILE_IN, CONFIG);
 		if (oapiReadItem_string (hFile, (char*)"MODULE_ATM", fname) || oapiReadItem_string (cfg, (char*)"MODULE_ATM", fname)) {
 			if (_stricmp (fname, "[None]"))
@@ -935,7 +935,7 @@ bool CELBODY2::LoadAtmosphereModule (const char *fname)
 {
 	char path[256], name[256];
 	oapiGetObjectName (hBody, name, 256);
-	sprintf (path, "Modules\\Celbody\\%s\\Atmosphere", name);
+	sprintf (path, "Modules/Celbody/%s/Atmosphere", name);
 	if (!(hAtmModule = g_pOrbiter->LoadModule (path, fname))) return false;
 	ATMOSPHERE *(*func)(CELBODY2*) = (ATMOSPHERE*(*)(CELBODY2*))GetProcAddress (hAtmModule, "CreateAtmosphere");
 	if (!func) {

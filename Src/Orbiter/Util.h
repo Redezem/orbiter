@@ -28,6 +28,9 @@ DWORDLONG Str2Crc (const char *str);
 // create the directories 
 bool MakePath (const char *fname);
 
+// convert Windows path separators to the platform-native form (no-op on Windows)
+void NormalizePathSeparators (char *path);
+
 // case-insensitive comparison of std::strings
 bool iequal(const std::string& s1, const std::string& s2);
 

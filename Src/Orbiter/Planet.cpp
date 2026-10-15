@@ -1013,7 +1013,7 @@ Vector Planet::WindVelocity (double lng, double lat, double alt, int frame, Wind
 void Planet::RegisterModule (char *dllname)
 {
 	char cbuf[256], funcname[256], *funcp;
-	sprintf (cbuf, "Modules\\%s.dll", dllname);
+	sprintf (cbuf, "Modules/%s.dll", dllname);
 	hMod = LoadLibrary (cbuf);
 	if (!hMod) return;
 	strcpy (funcname, name); funcp = funcname + strlen(name);

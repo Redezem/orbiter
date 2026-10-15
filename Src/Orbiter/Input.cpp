@@ -91,6 +91,7 @@ bool DInput::CreateJoyDevice ()
 
 void DInput::DestroyDevices ()
 {
+	if (!diframe) return; // headless session: input framework was never created
 	diframe->DestroyDevices();
 }
 
