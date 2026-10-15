@@ -208,6 +208,16 @@ target_link_options(orbiter-core-smoke PRIVATE
 	-Wl,-rpath,@executable_path
 )
 
+# Explicit opt-in: CPU-only real elevation API/data regression, no video/window.
+option(ORBITER_BUILD_ELEVATION_PROBE "Build the real-engine elevation scalar probe" OFF)
+if(ORBITER_BUILD_ELEVATION_PROBE)
+	add_executable(orbiter-elevation-probe smoke/elevation_probe.cpp)
+	foreach(prop INCLUDE_DIRECTORIES COMPILE_DEFINITIONS LINK_LIBRARIES LINK_OPTIONS)
+		get_target_property(value orbiter-core-smoke ${prop})
+		set_property(TARGET orbiter-elevation-probe PROPERTY ${prop} "${value}")
+	endforeach()
+endif()
+
 # Native vessel modules (real Src/Vessel sources built as .dylib against the
 # engine host's exported symbols)
 add_subdirectory(modules)
