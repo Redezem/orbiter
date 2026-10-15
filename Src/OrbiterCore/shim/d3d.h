@@ -7,6 +7,11 @@
 
 #include <windows.h>
 
+struct D3DDEVICEDESC7 {
+	DWORD cmDevCaps1;
+	DWORD cmDevCaps2;
+};
+
 #ifndef FLOAT
 using FLOAT = float;
 #endif

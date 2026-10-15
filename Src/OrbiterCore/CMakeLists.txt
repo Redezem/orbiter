@@ -44,6 +44,10 @@ set(ORB_CORE_SRC
 	${CMAKE_SOURCE_DIR}/Src/Orbiter/Log.cpp
 	${CMAKE_SOURCE_DIR}/Src/Orbiter/cmdline.cpp
 
+	# Engine main + module system
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/Orbiter.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/Script.cpp
+
 	# API implementations
 	${CMAKE_SOURCE_DIR}/Src/Orbiter/OrbiterAPI.cpp
 	${CMAKE_SOURCE_DIR}/Src/Orbiter/GraphicsAPI.cpp
@@ -62,6 +66,7 @@ target_include_directories(OrbiterCore PRIVATE
 	${CMAKE_SOURCE_DIR}/Orbitersdk/include
 	${CMAKE_SOURCE_DIR}/OVP
 	${CMAKE_SOURCE_DIR}/Src/Platform
+	${TRACY_CLIENT_INCLUDE}
 )
 
 target_link_libraries(OrbiterCore PRIVATE

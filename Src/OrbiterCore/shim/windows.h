@@ -141,18 +141,64 @@ inline DWORD GetCurrentDirectoryA(DWORD size, char *buffer)
 	if (buffer && size > 0) buffer[0] = '\0';
 	return 0;
 }
+inline bool SetCurrentDirectoryA(LPCSTR path) { (void)path; return true; }
+#ifndef SetCurrentDirectory
+#define SetCurrentDirectory SetCurrentDirectoryA
+#endif
+
+// Legacy GetVersion() call in WinMain (Windows version check). Orbiter's
+// own build version comes from Orbiter::GetVersion(); provide the free
+// function so the log line compiles.
+inline int GetVersion() { return 0; }
+
+// MSVC CRT env var setter
+#ifndef _putenv
+#define _putenv putenv
+#endif
+#ifndef _getcwd
+#define _getcwd getcwd
+#endif
 
 // Legacy timing: milliseconds since an arbitrary epoch.
-inline DWORD timeGetTime()
-{
+inline DWORD timeGetTime(){
 	using namespace std::chrono;
 	return static_cast<DWORD>(
 		duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
 }
+inline bool timeBeginPeriod(UINT p) { (void)p; return true; }
+inline bool timeEndPeriod(UINT p) { (void)p; return true; }
 
 #ifndef DWORDLONG
 using DWORDLONG = unsigned long long;
 #endif
+#ifndef ULONG
+using ULONG = unsigned long;
+#endif
+#ifndef LONG
+using LONG = long;
+#endif
+
+#ifndef LARGE_INTEGER
+union LARGE_INTEGER {
+	struct { DWORD LowPart; LONG HighPart; };
+	long long QuadPart;
+};
+#endif
+
+// High-resolution performance counter backed by POSIX clock.
+inline bool QueryPerformanceFrequency(LARGE_INTEGER *freq)
+{
+	if (freq) freq->QuadPart = 1000000000LL; // nanosecond resolution
+	return true;
+}
+inline bool QueryPerformanceCounter(LARGE_INTEGER *cnt)
+{
+	if (cnt) {
+		using namespace std::chrono;
+		cnt->QuadPart = duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count();
+	}
+	return true;
+}
 
 #ifndef ZeroMemory
 #define ZeroMemory(addr, len) memset((addr), 0, (len))
@@ -211,11 +257,44 @@ inline bool IsEqualGUID(const GUID &a, const GUID &b)
 }
 #endif
 
-#ifndef ULONG
-using ULONG = unsigned long;
+// MSVC math exception trap (not used on macOS; inert)
+#ifndef _EXCEPTION_DEFINED
+#define _EXCEPTION_DEFINED
+struct _exception {
+	int type;
+	char *name;
+	double retval;
+	double arg1;
+	double arg2;
+};
 #endif
-#ifndef LONG
-using LONG = long;
+
+// Registry (WINE detection etc. — inert on macOS)
+using HKEY = void *;
+#ifndef HKEY_CURRENT_USER
+#define HKEY_CURRENT_USER ((HKEY)(long)0x80000001)
+#endif
+#ifndef HKEY_LOCAL_MACHINE
+#define HKEY_LOCAL_MACHINE ((HKEY)(long)0x80000002)
+#endif
+#ifndef KEY_QUERY_VALUE
+#define KEY_QUERY_VALUE 1
+#endif
+#ifndef ERROR_SUCCESS
+#define ERROR_SUCCESS 0L
+#endif
+#ifndef ERROR_FILE_NOT_FOUND
+#define ERROR_FILE_NOT_FOUND 2L
+#endif
+inline long RegOpenKeyExA(HKEY root, LPCSTR sub, DWORD opts, DWORD access, HKEY *out)
+{
+	(void)root; (void)sub; (void)opts; (void)access;
+	if (out) *out = nullptr;
+	return 2; // ERROR_FILE_NOT_FOUND: no WINE registry on macOS
+}
+inline long RegCloseKey(HKEY key) { (void)key; return 0; }
+#ifndef RegOpenKeyEx
+#define RegOpenKeyEx RegOpenKeyExA
 #endif
 
 // GDI device context + DIB section: legacy image assembly path. The macOS

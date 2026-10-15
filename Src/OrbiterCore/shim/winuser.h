@@ -216,6 +216,30 @@
 #ifndef SW_SHOWMINIMIZED
 #define SW_SHOWMINIMIZED 2
 #endif
+#ifndef SW_MAXIMIZE
+#define SW_MAXIMIZE 3
+#endif
+#ifndef SWP_NOACTIVATE
+#define SWP_NOACTIVATE 0x0010
+#endif
+#ifndef SWP_NOOWNERZORDER
+#define SWP_NOOWNERZORDER 0x0200
+#endif
+#ifndef SWP_FRAMECHANGED
+#define SWP_FRAMECHANGED 0x0020
+#endif
+#ifndef WS_BORDER
+#define WS_BORDER 0x00800000L
+#endif
+#ifndef WS_TABSTOP
+#define WS_TABSTOP 0x00020000L
+#endif
+#ifndef WS_CHILD
+#define WS_CHILD 0x40000000L
+#endif
+#ifndef WS_VISIBLE
+#define WS_VISIBLE 0x10000000L
+#endif
 
 #ifndef MAKEINTRESOURCE
 #define MAKEINTRESOURCE(i) (reinterpret_cast<LPCSTR>((uintptr_t)(i)))
@@ -348,6 +372,131 @@ inline DWORD GetWindowThreadProcessId(HWND hwnd, DWORD *pid)
 }
 
 // ---- message loop ----
+#ifndef SC_MONITORPOWER
+#define SC_MONITORPOWER 0xF170
+#endif
+#ifndef WM_NCHITTEST
+#define WM_NCHITTEST 0x0084
+#endif
+#ifndef HTCLIENT
+#define HTCLIENT 1
+#endif
+#ifndef SPIF_SENDCHANGE
+#define SPIF_SENDCHANGE 0x0002
+#endif
+#ifndef SPIF_UPDATEINIFILE
+#define SPIF_UPDATEINIFILE 0x0001
+#endif
+#ifndef MONITOR_POWER_ON
+#define MONITOR_POWER_ON 1
+#endif
+#ifndef MONITOR_POWER_OFF
+#define MONITOR_POWER_OFF 2
+#endif
+
+inline LRESULT SendMessageA(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+	(void)hwnd; (void)msg; (void)wp; (void)lp;
+	return 0;
+}
+#ifndef SendMessage
+#define SendMessage SendMessageA
+#endif
+
+#ifndef WA_INACTIVE
+#define WA_INACTIVE 0
+#endif
+#ifndef WA_ACTIVE
+#define WA_ACTIVE 1
+#endif
+#ifndef WA_CLICKACTIVE
+#define WA_CLICKACTIVE 2
+#endif
+
+struct MINMAXINFO {
+	POINT ptMinTrackSize;
+	POINT ptMaxTrackSize;
+	POINT ptMaxSize;
+	POINT ptMaxPosition;
+	POINT ptMinPos;
+};
+using LPMINMAXINFO = MINMAXINFO *;
+
+#ifndef WM_POWERBROADCAST
+#define WM_POWERBROADCAST 0x0218
+#endif
+#ifndef PBT_APMQUERYSUSPEND
+#define PBT_APMQUERYSUSPEND 0x0000
+#endif
+#ifndef PBT_APMRESUMESUSPEND
+#define PBT_APMRESUMESUSPEND 0x0007
+#endif
+#ifndef PBT_APMSUSPEND
+#define PBT_APMSUSPEND 0x0004
+#endif
+#ifndef PBT_APMRESUMEAUTOMATIC
+#define PBT_APMRESUMEAUTOMATIC 0x0012
+#endif
+#ifndef BROADCAST_QUERY_DENY
+#define BROADCAST_QUERY_DENY 0x424D5144
+#endif
+
+#ifndef PM_NOREMOVE
+#define PM_NOREMOVE 0x0000
+#endif
+#ifndef PM_REMOVE
+#define PM_REMOVE 0x0001
+#endif
+#ifndef PM_NOYIELD
+#define PM_NOYIELD 0x0002
+#endif
+#ifndef IDC_WAIT
+#define IDC_WAIT MAKEINTRESOURCE(32514)
+#endif
+#ifndef IDC_CROSS
+#define IDC_CROSS MAKEINTRESOURCE(32515)
+#endif
+#ifndef IDC_HAND
+#define IDC_HAND MAKEINTRESOURCE(32649)
+#endif
+
+inline HWND SetCapture(HWND hwnd) { (void)hwnd; return nullptr; }
+inline void ReleaseCapture() {}
+inline bool ClipCursor(const RECT *r) { (void)r; return true; }
+
+#ifndef SPI_GETFONTSMOOTHING
+#define SPI_GETFONTSMOOTHING 0x004A
+#endif
+#ifndef SPI_SETFONTSMOOTHING
+#define SPI_SETFONTSMOOTHING 0x004B
+#endif
+#ifndef SPI_GETWORKAREA
+#define SPI_GETWORKAREA 0x0030
+#endif
+inline bool SystemParametersInfoA(UINT action, UINT param, void *vparam, UINT flags)
+{
+	(void)action; (void)param; (void)flags;
+	if (action == SPI_GETFONTSMOOTHING && vparam) *static_cast<bool*>(vparam) = false;
+	if (action == SPI_GETWORKAREA && vparam) { RECT *r = (RECT*)vparam; r->left = r->top = r->right = r->bottom = 0; }
+	return true;
+}
+#ifndef SystemParametersInfo
+#define SystemParametersInfo SystemParametersInfoA
+#endif
+
+#ifndef ORBITER_SHIM_WNDCLASSA_DEFINED
+#define ORBITER_SHIM_WNDCLASSA_DEFINED
+using LPWNDCLASSA = WNDCLASSA *;
+#endif
+inline bool GetClassInfoA(HINSTANCE inst, LPCSTR name, LPWNDCLASSA out)
+{
+	(void)inst; (void)name; (void)out;
+	return false; // no registered Win32 window classes on macOS
+}
+#ifndef GetClassInfo
+#define GetClassInfo GetClassInfoA
+#endif
+
 inline bool PeekMessageA(LPMSG msg, HWND hwnd, UINT min, UINT max, UINT remove)
 {
 	(void)hwnd; (void)min; (void)max; (void)remove;
@@ -438,6 +587,9 @@ inline HGDIOBJ GetStockObject(int idx) { (void)idx; return nullptr; }
 #endif
 #ifndef CreateDialogParam
 #define CreateDialogParam CreateDialogParamA
+#endif
+#ifndef CreateDialog
+#define CreateDialog(inst, tmpl, parent, proc) CreateDialogParamA((inst), (tmpl), (parent), (proc), 0)
 #endif
 #ifndef CreateDialog
 #define CreateDialog CreateDialogParamA
