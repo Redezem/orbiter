@@ -38,6 +38,7 @@
 #include "animation_contract_probe.h"
 #include "gear_visual.h"
 #include "planet_surface.h"
+#include "terrain_patch.h"
 
 extern Orbiter *g_pOrbiter;
 
@@ -47,6 +48,7 @@ public:
         : GraphicsClient(nullptr), present_(present), engine_camera_(engineCamera), freeze_clip_(freezeClip), materials_(materials), textures_(textures), ignore_sampling_(ignoreSampling), snapshot_(std::move(snapshot)) {}
     void setTestCamera(unsigned view, bool materialViews=false) {
         check(engine_camera_ && (view == 1 || view == 2), "invalid controlled camera");
+        if(terrain_) { terrain_->camera(view); controlled_view_=view; return; }
         CameraMode_Track mode;
         mode.SetTarget(planet_ ? planet_->body() : visual_object_);
         mode.SetTrackMode(CameraMode_Track::TM_RELATIVE);
@@ -223,6 +225,12 @@ public:
         td.usage=MTLTextureUsageRenderTarget; td.storageMode=MTLStorageModePrivate;
         mesh_depth_=[device_ newTextureWithDescriptor:td];
         check(mesh_depth_state_ && mesh_depth_, "mesh depth allocation failed");
+        if(terrainMode) {
+            terrain_=std::make_unique<core_metal::TerrainPatch>();
+            terrain_->coast=terrainCoast; terrain_->flat=terrainFlat; terrain_->freeze=terrainFreeze; terrain_->swapUV=terrainSwap;
+            terrain_->attach(*this,device_);
+            terrain_->camera(1); controlled_view_=1;
+        }
         if(planetMode) {
             planet_=std::make_unique<core_metal::PlanetSurface>();
             planet_->freeze=planetFreeze; planet_->ignoreSampling=planetIgnore; planet_->swap=planetSwap;
@@ -232,11 +240,13 @@ public:
     MESHHANDLE clbkGetMesh(VISHANDLE visual, DWORD index) override {
         return gear_ && visual_object_ && visual==reinterpret_cast<VISHANDLE>(this) && index==0 && gear_->handles.valid(gear_->handle) ? gear_->handle : nullptr;
     }
+    bool terrainMode=false,terrainCoast=false,terrainFlat=false,terrainFreeze=false,terrainSwap=false;
     bool planetMode=false,planetFreeze=false,planetIgnore=false,planetSwap=false;
     bool gearTest=false,gearFreeze=false,gearCleanupFault=false;
     unsigned gearSplit=0;
     bool detachFocusMesh() noexcept {
         bool ok=true;
+        terrain_.reset();
         planet_.reset();
         if(gear_) {
             if(gearCleanupFault) gear_->validationFaultForTest=true;
@@ -421,7 +431,7 @@ public:
                scheduled == (present_ ? n : 0) && acquired == scheduled && hidden_checks == n && creates == 1 && closes == 1 && destroys == 1 &&
                imgui_init == 1 && imgui_shutdown == 1 &&
                (snapshot_.empty() || (uploaded_meshes > 0 && uploaded_triangles > 0 &&
-                 mesh_draw_calls == n && drawn_triangles == uploaded_triangles*n &&
+                 (terrainMode ? terrain_draw_calls==n && mesh_draw_calls==0 : mesh_draw_calls == n && drawn_triangles == uploaded_triangles*n) &&
                  geometry_readbacks == n && visual_register == 1 && visual_unregister == 1)) &&
                (!engine_camera_ || camera_frames_ == n);
     }
@@ -455,6 +465,7 @@ protected:
             check(!range.handle || texture_store_->lookup(range.handle),"stale/foreign texture draw handle");
         if(gear_) gear_->update(renders,gearSplit,gearFreeze); // after actual engine step, before draw
         if(engine_camera_) updateEngineCamera();
+        if(terrain_) terrain_->update(renders,controlled_view_);
         if(planet_) planet_->update(renders,controlled_view_);
         if(gear_) controlled_view_=renders>gearSplit ? 2 : 1; // snapshot state label, NOT camera mutation
         drawable_ = present_ ? [layer_ nextDrawable] : nil;
@@ -474,8 +485,9 @@ protected:
         buffer_ = [queue_ commandBuffer];
         encoder_ = [buffer_ renderCommandEncoderWithDescriptor:pass];
         if (!buffer_ || !encoder_) throw std::runtime_error("Metal encoding failed");
+        if(terrain_) { terrain_->draw(encoder_,mesh_depth_state_); ++terrain_draw_calls; }
         if(planet_) planet_->draw(encoder_,mesh_depth_state_);
-        if (mesh_pipeline_) {
+        if (mesh_pipeline_ && !terrainMode) {
             [encoder_ setRenderPipelineState:mesh_pipeline_];
             [encoder_ setDepthStencilState:mesh_depth_state_];
             [encoder_ setCullMode:MTLCullModeNone];
@@ -570,7 +582,7 @@ protected:
                 for (size_t i=0;i<pixels.size();i+=4) {
                     const auto *p=&pixels[i];
                     if(p[0]==128&&p[1]==64&&p[2]==32&&p[3]==255) { ++background; continue; }
-                    if(textures_ || planetMode) { if(p[3]==255) { ++geometry; if(p[0]!=p[1]||p[1]!=p[2]) ++chromatic; } else ++invalid; }
+                    if(textures_ || planetMode || terrainMode) { if(p[3]==255) { ++geometry; if(p[0]!=p[1]||p[1]!=p[2]) ++chromatic; } else ++invalid; }
                     else if(materials_) {
                         bool allowed=std::any_of(material_palette_.begin(),material_palette_.end(),[p](const auto &color){ return core_metal::diffusePixel(p,color.data()); });
                         if(allowed) { ++geometry; if(p[0]!=p[1] || p[1]!=p[2]) ++chromatic; }
@@ -643,7 +655,7 @@ private:
         // Metal clip accepts that same X/Y and 0<=Z<=W. No OpenGL -Z or Y flip:
         // Metal's viewport maps +NDC Y upward into the top-left-origin render target.
         // Client-owned bounded vessel frustum, not claimed to be engine near/far policy.
-        const double nearPlane=planetMode ? 1000.0 : 0.1, farPlane=planetMode ? 50000000.0 : 1000000.0;
+        const double nearPlane=terrainMode ? 10.0 : (planetMode ? 1000.0 : 0.1), farPlane=terrainMode ? 200000.0 : (planetMode ? 50000000.0 : 1000000.0);
         double sy=1.0/std::tan(aperture), sx=sy*height/width;
         double a=farPlane/(farPlane-nearPlane), b=-nearPlane*a;
         for(unsigned col=0;col<4;++col) {
@@ -675,6 +687,7 @@ private:
         printf("]}\n");
     }
     void release() {
+        terrain_.reset();
         planet_.reset();
         if(texture_store_) {
             printf("[core-metal] texture_store requests=%u successes=%u uploads=%u cache_hits=%u releases=%u invalid_releases=%u resident=%zu group_draws=%u\n",texture_store_->requests,texture_store_->successes,texture_store_->uploads,texture_store_->hits,texture_store_->releases,texture_store_->invalidReleases,texture_store_->resident,texture_group_draws_);
@@ -693,6 +706,7 @@ private:
         if (sdl_) SDL_Quit();
         sdl_ = false;
     }
+    std::unique_ptr<core_metal::TerrainPatch> terrain_;
     std::unique_ptr<core_metal::PlanetSurface> planet_;
     std::unique_ptr<core_metal::GearVisual> gear_;
     id<MTLBuffer> gear_normals_=nil;
@@ -721,6 +735,7 @@ private:
     id<MTLTexture> mesh_depth_=nil;
     id<MTLTexture> mesh_oracle_=nil;
     unsigned uploaded_meshes=0,uploaded_groups=0,uploaded_vertices=0,uploaded_triangles=0,mesh_draw_calls=0;
+    unsigned terrain_draw_calls=0;
     unsigned geometry_readbacks=0,visual_register=0,visual_unregister=0,unsupported_visual_events=0;
     unsigned long long drawn_triangles=0;
     SDL_Window *window_ = nullptr;
@@ -742,10 +757,15 @@ int main(int argc, char **argv) {
     bool session=false, sessionTest=false, ignoreInput=false, present=false, bufferedTest=false, ignoreBuffer=false;
     bool platformInput=false,imguiTest=false,ignoreForward=false;
     bool animationContract=false,gearTest=false,gearFreeze=false,gearCleanupFault=false;
+    bool terrainCoast=false,terrainFlat=false,terrainFreeze=false,terrainSwap=false;
     bool planetFreeze=false,planetIgnore=false,planetSwap=false;
     while(argc>3) {
         std::string option=argv[argc-1];
         if(option=="--hidden-present") { if(present) return 2; present=true; --argc; }
+        else if(option=="--terrain-coast") { if(terrainCoast) return 2; terrainCoast=true; --argc; }
+        else if(option=="--diagnostic-flat-terrain") { if(terrainFlat) return 2; terrainFlat=true; --argc; }
+        else if(option=="--diagnostic-freeze-terrain-transform") { if(terrainFreeze) return 2; terrainFreeze=true; --argc; }
+        else if(option=="--diagnostic-swap-terrain-uv") { if(terrainSwap) return 2; terrainSwap=true; --argc; }
         else if(option=="--diagnostic-freeze-planet-transform") { if(planetFreeze) return 2; planetFreeze=true; --argc; }
         else if(option=="--diagnostic-ignore-planet-sampling") { if(planetIgnore) return 2; planetIgnore=true; --argc; }
         else if(option=="--diagnostic-swap-planet-hemispheres") { if(planetSwap) return 2; planetSwap=true; --argc; }
@@ -766,6 +786,7 @@ int main(int argc, char **argv) {
         } else break;
     }
     if (argc < 3 || argc > 6) {
+        fprintf(stderr,"Bounded terrain: <scenario> <frames> --terrain-patch|--terrain-patch-test snapshot.ppm [--terrain-coast] [--diagnostic-flat-terrain|--diagnostic-freeze-terrain-transform|--diagnostic-swap-terrain-uv]; fixed engine ground camera, unlit real curved patch, no streaming/contact/flight coverage.\n");
         fprintf(stderr,"Earth orbit-only modes: <scenario> <frames> --planet-surface|--planet-surface-test snapshot.ppm [--diagnostic-freeze-planet-transform|--diagnostic-ignore-planet-sampling|--diagnostic-swap-planet-hemispheres]; hidden/offscreen, unlit h=0 sphere, not elevation terrain.\n");
         fprintf(stderr,"Usage (from content root): orbiter-core-metal <scenario> <frames 1..10000> [--mesh snapshot.ppm | --engine-camera snapshot.ppm | --engine-camera-test snapshot.ppm | --diagnostic-frozen-camera-test snapshot.ppm | --materials snapshot.ppm | --materials-test snapshot.ppm | --materials-reference-test snapshot.ppm | --textures snapshot.ppm | --textures-test snapshot.ppm | --textures-ignore-sampling-test snapshot.ppm] [--hidden-present] [--animation-contract-test | --gear-animation-test | --gear-animation-frozen-test] [--platform-input | --imgui-input-test | --imgui-input-ignore-test | --buffered-input-test | --buffered-input-ignore-test | --session-input | --session-input-test | --session-input-ignore-test]\nSession test modes require a bound of at least 16 frames; all windows remain hidden.\n");
         return 2;
@@ -773,18 +794,21 @@ int main(int argc, char **argv) {
     char *end = nullptr;
     long frames = strtol(argv[2], &end, 10);
     int modeArgc=argc;
+    bool terrain=modeArgc==5 && (std::string(argv[3])=="--terrain-patch" || std::string(argv[3])=="--terrain-patch-test");
+    if((terrainCoast||terrainFlat||terrainFreeze||terrainSwap) && !terrain) return 2;
+    if(terrain && (session||gearTest||animationContract||present)) return 2;
     bool planet=modeArgc==5 && (std::string(argv[3])=="--planet-surface" || std::string(argv[3])=="--planet-surface-test");
     if((planetFreeze||planetIgnore||planetSwap) && !planet) return 2;
     if(planet && (session||gearTest||animationContract||present)) return 2;
     bool textures=modeArgc==5 && (std::string(argv[3])=="--textures" || std::string(argv[3])=="--textures-test" || std::string(argv[3])=="--textures-ignore-sampling-test");
     if (!end || *end || frames < 1 || frames > 10000 ||
         (modeArgc != 3 && modeArgc != 5) ||
-        (modeArgc == 5 && ((!planet && !textures && std::string(argv[3]) != "--mesh" && std::string(argv[3]) != "--engine-camera" && std::string(argv[3]) != "--engine-camera-test" && std::string(argv[3]) != "--diagnostic-frozen-camera-test" && std::string(argv[3]) != "--materials" && std::string(argv[3]) != "--materials-test" && std::string(argv[3]) != "--materials-reference-test") || !argv[4][0]))) return 2;
+        (modeArgc == 5 && ((!terrain && !planet && !textures && std::string(argv[3]) != "--mesh" && std::string(argv[3]) != "--engine-camera" && std::string(argv[3]) != "--engine-camera-test" && std::string(argv[3]) != "--diagnostic-frozen-camera-test" && std::string(argv[3]) != "--materials" && std::string(argv[3]) != "--materials-test" && std::string(argv[3]) != "--materials-reference-test") || !argv[4][0]))) return 2;
     bool engineCamera=modeArgc==5 && std::string(argv[3])!="--mesh";
     bool freezeClip=modeArgc==5 && std::string(argv[3])=="--diagnostic-frozen-camera-test";
     bool materials=textures || (modeArgc==5 && (std::string(argv[3])=="--materials" || std::string(argv[3])=="--materials-test"));
     bool materialViews=(textures && std::string(argv[3])!="--textures") || (modeArgc==5 && (std::string(argv[3])=="--materials-test" || std::string(argv[3])=="--materials-reference-test"));
-    bool cameraTest=modeArgc==5 && (std::string(argv[3])=="--planet-surface-test" || std::string(argv[3])=="--engine-camera-test" || materialViews || freezeClip);
+    bool cameraTest=modeArgc==5 && (std::string(argv[3])=="--terrain-patch-test" || std::string(argv[3])=="--planet-surface-test" || std::string(argv[3])=="--engine-camera-test" || materialViews || freezeClip);
     if(cameraTest && frames<2) return 2;
     if(sessionTest && frames<16) return 2;
     if(bufferedTest && frames<19) return 2;
@@ -812,8 +836,10 @@ int main(int argc, char **argv) {
                 throw std::runtime_error("core native Create returned no CDIFramework7");
             g_pOrbiter->Cfg()->CfgDebugPrm.ShutdownMode = 0;
             g_pOrbiter->SetFastExit(false);
+            if(terrain) { g_pOrbiter->Cfg()->CfgVisualPrm.ElevMode=2; g_pOrbiter->Cfg()->CfgPRenderPrm.TileLoadFlags=2; }
             client = new CoreMetalClient(present, modeArgc == 5 ? argv[4] : "", engineCamera, freezeClip, materials, textures, textures && std::string(argv[3])=="--textures-ignore-sampling-test");
             client->platformInput=platformInput;
+            client->terrainMode=terrain; client->terrainCoast=terrainCoast; client->terrainFlat=terrainFlat; client->terrainFreeze=terrainFreeze; client->terrainSwap=terrainSwap;
             client->planetMode=planet; client->planetFreeze=planetFreeze; client->planetIgnore=planetIgnore; client->planetSwap=planetSwap;
             client->animationContract=animationContract;
             client->gearTest=gearTest; client->gearFreeze=gearFreeze; client->gearSplit=unsigned(frames/2);
