@@ -692,6 +692,30 @@ Vessel rendering remains present with the common depth policy, but **measurable
 vessel/planet occlusion is not established** by this distant fixture. Streaming,
 LOD, elevation, low flight precision and general body support remain future work.
 
+## Bounded anchored terrain and shared vessel depth
+
+See [TERRAIN.md](TERRAIN.md) for the separate mountain/KSC terrain-only modes and
+the new explicit `--terrain-vessel-test snapshot.ppm` combined mode. Run:
+
+```sh
+python3 Src/OrbiterCore/metal/terrain_vessel_regression.py \
+ out/build/macos-core-spike/Src/OrbiterCore/metal/orbiter-core-metal \
+ out/stage/content /Users/redezem/.hermes/cache/scratch/orbiter-terrain-vessel-proof
+```
+
+The real-engine DG and actual elevation/Surf KSC patch share the SDK external
+camera, 0.5..5000 m projection and one Depth32Float attachment/encoder. Independent
+CPU geometry/texture witnesses measure both terrain-front and vessel-front
+overlap in actual pre-UI GPU readbacks. Real omit-draw diagnostics isolate each
+object, depth-disabled vessel drawing must fail the same gate, and reversed
+object order must produce the identical depth-tested image. No synthetic image,
+terrain height offset or vessel model transform is used. The fixture starts from
+an actual landed scenario but the first rendered API status is active (0); the
+static, unanimated template penetrates the source elevation by about 4.98 m.
+This is explicitly a bounded renderer occlusion proof, **not** landed/gear/contact
+physics, full flight coverage, atmosphere support or a whole-app milestone.
+All windows stay hidden/offscreen; separate legacy branches remain unchanged.
+
 ## Review dispositions
 
 Independent review requested staging safety and UI-isolated camera image checks;

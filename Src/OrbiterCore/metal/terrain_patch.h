@@ -20,7 +20,7 @@ class TerrainPatch {
     };
     static void require(bool b,const char *s){if(!b)throw std::runtime_error(s);}
 public:
-    bool coast=false,flat=false,freeze=false,swapUV=false;
+    bool coast=false,flat=false,freeze=false,swapUV=false,combined=false;
     OBJHANDLE body()const{return body_;}
     void camera(unsigned view) {
         // Real SDK ground observer, mean-radius altitude. Camera.cpp:279-295,
@@ -108,7 +108,8 @@ public:
     void update(unsigned frame,unsigned view){
         VECTOR3 camera,body;MATRIX3 cr,br;oapiCameraGlobalPos(&camera);oapiCameraRotationMatrix(&cr);oapiGetGlobalPos(body_,&body);oapiGetRotationMatrix(body_,&br);
         auto t=tmul(cr,(body-camera)+mul(br,anchor_));auto r=mul(transp(cr),br);
-        double aperture=oapiCameraAperture(),sy=1/tan(aperture),sx=sy*480/640,a=200000./(200000.-10.),b=-10*a;
+        double nearPlane=combined?.5:10.,farPlane=combined?5000.:200000.;
+        double aperture=oapiCameraAperture(),sy=1/tan(aperture),sx=sy*480/640,a=farPlane/(farPlane-nearPlane),b=-nearPlane*a;
         float computed[16];
         for(int col=0;col<4;++col){double x=col<3?r.data[col]:t.x,y=col<3?r.data[3+col]:t.y,z=col<3?r.data[6+col]:t.z;double v[4]={sx*x,sy*y,a*z+(col==3?b:0),z};for(int row=0;row<4;++row){computed[col*4+row]=float(v[row]);require(std::isfinite(v[row])&&std::isfinite(computed[col*4+row]),"terrain nonfinite actual pose");}}
         if(!freeze||frame==1)std::copy(computed,computed+16,bound_);

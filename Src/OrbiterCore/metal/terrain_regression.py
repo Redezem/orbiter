@@ -185,7 +185,7 @@ def oracle(f, snapshot, ref, vertices):
                 missing_interior=missing,extra_exterior=extra,boundary_tolerance_px=2),image
 
 
-def numeric(f, g, ref, vertices):
+def numeric(f, g, ref, vertices, visible_projection_only=False):
     require(tuple(g['patch'])==ref.key and tuple(g['ancestor'])==ref.ancestor,'source address mismatch')
     require(len(g['vertices'])==1089,'terrain vertex count')
     lng,lat=coordinates(ref.key,16,16)
@@ -204,7 +204,8 @@ def numeric(f, g, ref, vertices):
         p=uploaded[4:7]+[1]
         clip=[sum(f['bound'][c*4+r]*p[c] for c in range(4)) for r in range(4)]
         xy=(320+320*clip[0]/clip[3],240-240*clip[1]/clip[3])
-        max_projection=max(max_projection,max(abs(a-b) for a,b in zip(xy,screen[:2])))
+        if not visible_projection_only or (screen[2]>.5 and -640<screen[0]<1280 and -480<screen[1]<960):
+            max_projection=max(max_projection,max(abs(a-b) for a,b in zip(xy,screen[:2])))
     require(max_offset<.002,'anchor offset precision lost')
     require(max_bad>.05,'radius-scale float precision negative not sensitive')
     require(max_projection<.02,'bound GPU projection mismatch')

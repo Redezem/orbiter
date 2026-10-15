@@ -1,5 +1,5 @@
 // Real OrbiterCore -> GraphicsClient -> Metal lifecycle probe.
-// Static template diagnostics plus opt-in DG gear instance test; no terrain/HUD.
+// Static templates, opt-in DG gear, and bounded anchored terrain; no HUD/full app.
 // Keep the engine's Win32-compatible int BOOL distinct from Objective-C's bool BOOL.
 // Renaming the alias locally preserves the C++ ABI without changing shared headers.
 #define BOOL OrbiterWinBOOL
@@ -48,13 +48,14 @@ public:
         : GraphicsClient(nullptr), present_(present), engine_camera_(engineCamera), freeze_clip_(freezeClip), materials_(materials), textures_(textures), ignore_sampling_(ignoreSampling), snapshot_(std::move(snapshot)) {}
     void setTestCamera(unsigned view, bool materialViews=false) {
         check(engine_camera_ && (view == 1 || view == 2), "invalid controlled camera");
-        if(terrain_) { terrain_->camera(view); controlled_view_=view; return; }
+        if(terrain_ && !terrainVessel) { terrain_->camera(view); controlled_view_=view; return; }
         CameraMode_Track mode;
         mode.SetTarget(planet_ ? planet_->body() : visual_object_);
         mode.SetTrackMode(CameraMode_Track::TM_RELATIVE);
         // Material views look down onto actual canopy materials rather than the
         // original camera regression's all-white underside. Original views unchanged.
-        if(planet_) mode.SetPosition(3.0,view==1 ? 0.4 : 2.1,view==1 ? 0.3 : -0.3);
+        if(terrainVessel) mode.SetPosition(4.0,view==1?2.74:2.04,.02);
+        else if(planet_) mode.SetPosition(3.0,view==1 ? 0.4 : 2.1,view==1 ? 0.3 : -0.3);
         else mode.SetPosition(textures_ ? 2.8 : 4.0, materialViews ? (view == 1 ? 2.74 : 2.04) : (view == 1 ? 0.4 : 1.1), materialViews ? (view == 1 ? -0.6 : -0.8) : (view == 1 ? 0.3 : 0.5));
         mode.SetFOV(40.0); // full vertical FOV in degrees; engine API aperture is half-FOV radians.
         check(oapiSetCameraMode(mode), "engine camera mode rejected");
@@ -227,9 +228,10 @@ public:
         check(mesh_depth_state_ && mesh_depth_, "mesh depth allocation failed");
         if(terrainMode) {
             terrain_=std::make_unique<core_metal::TerrainPatch>();
-            terrain_->coast=terrainCoast; terrain_->flat=terrainFlat; terrain_->freeze=terrainFreeze; terrain_->swapUV=terrainSwap;
+            terrain_->coast=terrainCoast; terrain_->flat=terrainFlat; terrain_->freeze=terrainFreeze; terrain_->swapUV=terrainSwap; terrain_->combined=terrainVessel;
             terrain_->attach(*this,device_);
-            terrain_->camera(1); controlled_view_=1;
+            if(terrainVessel) setTestCamera(1,true); else terrain_->camera(1);
+            controlled_view_=1;
         }
         if(planetMode) {
             planet_=std::make_unique<core_metal::PlanetSurface>();
@@ -241,6 +243,7 @@ public:
         return gear_ && visual_object_ && visual==reinterpret_cast<VISHANDLE>(this) && index==0 && gear_->handles.valid(gear_->handle) ? gear_->handle : nullptr;
     }
     bool terrainMode=false,terrainCoast=false,terrainFlat=false,terrainFreeze=false,terrainSwap=false;
+    bool terrainVessel=false,omitVessel=false,omitTerrain=false,disableSceneDepth=false,terrainLast=false;
     bool planetMode=false,planetFreeze=false,planetIgnore=false,planetSwap=false;
     bool gearTest=false,gearFreeze=false,gearCleanupFault=false;
     unsigned gearSplit=0;
@@ -431,7 +434,7 @@ public:
                scheduled == (present_ ? n : 0) && acquired == scheduled && hidden_checks == n && creates == 1 && closes == 1 && destroys == 1 &&
                imgui_init == 1 && imgui_shutdown == 1 &&
                (snapshot_.empty() || (uploaded_meshes > 0 && uploaded_triangles > 0 &&
-                 (terrainMode ? terrain_draw_calls==n && mesh_draw_calls==0 : mesh_draw_calls == n && drawn_triangles == uploaded_triangles*n) &&
+                 (terrainVessel ? terrain_draw_calls==(omitTerrain?0:n) && mesh_draw_calls==(omitVessel?0:n) : (terrainMode ? terrain_draw_calls==n && mesh_draw_calls==0 : mesh_draw_calls == n && drawn_triangles == uploaded_triangles*n)) &&
                  geometry_readbacks == n && visual_register == 1 && visual_unregister == 1)) &&
                (!engine_camera_ || camera_frames_ == n);
     }
@@ -444,6 +447,7 @@ public:
                updates,newframes,renders,drawdata,displays,completed,presented,readbacks,errors);
         printf("[core-metal] create=%u close=%u destroy=%u imgui_init=%u imgui_shutdown=%u\n",
                creates,closes,destroys,imgui_init,imgui_shutdown);
+        if(terrainVessel) printf("[core-metal] combined_draws terrain=%u vessel=%u same_encoder=1 same_depth_attachment=1\n",terrain_draw_calls,mesh_draw_calls);
         if (!snapshot_.empty()) printf("[core-metal] mesh uploads=%u groups=%u vertices=%u triangles=%u draw_calls=%u drawn_triangles=%llu geometry_readbacks=%u visual_register=%u visual_unregister=%u unsupported_events=%u\n",
             uploaded_meshes,uploaded_groups,uploaded_vertices,uploaded_triangles,mesh_draw_calls,
             drawn_triangles,geometry_readbacks,visual_register,visual_unregister,unsupported_visual_events);
@@ -485,11 +489,11 @@ protected:
         buffer_ = [queue_ commandBuffer];
         encoder_ = [buffer_ renderCommandEncoderWithDescriptor:pass];
         if (!buffer_ || !encoder_) throw std::runtime_error("Metal encoding failed");
-        if(terrain_) { terrain_->draw(encoder_,mesh_depth_state_); ++terrain_draw_calls; }
+        if(terrain_ && !omitTerrain && !terrainLast) { terrain_->draw(encoder_,mesh_depth_state_); ++terrain_draw_calls; }
         if(planet_) planet_->draw(encoder_,mesh_depth_state_);
-        if (mesh_pipeline_ && !terrainMode) {
+        if (mesh_pipeline_ && (!terrainMode || terrainVessel) && !omitVessel) {
             [encoder_ setRenderPipelineState:mesh_pipeline_];
-            [encoder_ setDepthStencilState:mesh_depth_state_];
+            [encoder_ setDepthStencilState:disableSceneDepth ? nil : mesh_depth_state_];
             [encoder_ setCullMode:MTLCullModeNone];
             [encoder_ setVertexBuffer:mesh_vertices_ offset:0 atIndex:0];
             if(gear_) {
@@ -527,6 +531,7 @@ protected:
                 indexType:MTLIndexTypeUInt32 indexBuffer:mesh_indices_ indexBufferOffset:0];
             ++mesh_draw_calls; drawn_triangles+=uploaded_triangles;
         }
+        if(terrain_ && !omitTerrain && terrainLast) { terrain_->draw(encoder_,mesh_depth_state_); ++terrain_draw_calls; }
         // Deliberately no Render2DOverlay: native surfaces/Sketchpad/HUD are not supported.
     }
     bool clbkDisplayFrame() override {
@@ -572,7 +577,8 @@ protected:
             // Verify actual GPU output, not just callback dispatch. Corner avoids ImGui content.
             unsigned char bgra[4] = {};
             [target_ getBytes:bgra bytesPerRow:4 fromRegion:MTLRegionMake2D(width-1,height-1,1,1) mipmapLevel:0];
-            check(bgra[0] == 128 && bgra[1] == 64 && bgra[2] == 32 && bgra[3] == 255, "GPU clear pixel");
+            // Close combined view legitimately covers the entire target with ground.
+            if(!terrainVessel) check(bgra[0] == 128 && bgra[1] == 64 && bgra[2] == 32 && bgra[3] == 255, "GPU clear pixel");
             ++readbacks;
             if (mesh_pipeline_) {
                 std::vector<unsigned char> pixels(width*height*4);
@@ -593,7 +599,7 @@ protected:
                     check(invalid==0,"GPU non-material palette (mesh-only oracle)");
                     printf("[core-metal] material_pixels frame=%u chromatic=%u invalid=%u geometry=%u\n",completed,chromatic,invalid,geometry);
                 }
-                check(background>1000 && geometry>1000, "GPU mesh/background pixel counts");
+                check((terrainVessel || background>1000) && geometry>1000, "GPU mesh/background pixel counts");
                 if(textures_) {
                     check(invalid==0,"nonopaque texture output");
                     printf("[core-metal] texture_pixels frame=%u chromatic=%u geometry=%u ignore_sampling=%u\n",completed,chromatic,geometry,ignore_sampling_);
@@ -655,7 +661,7 @@ private:
         // Metal clip accepts that same X/Y and 0<=Z<=W. No OpenGL -Z or Y flip:
         // Metal's viewport maps +NDC Y upward into the top-left-origin render target.
         // Client-owned bounded vessel frustum, not claimed to be engine near/far policy.
-        const double nearPlane=terrainMode ? 10.0 : (planetMode ? 1000.0 : 0.1), farPlane=terrainMode ? 200000.0 : (planetMode ? 50000000.0 : 1000000.0);
+        const double nearPlane=terrainVessel ? 0.5 : (terrainMode ? 10.0 : (planetMode ? 1000.0 : 0.1)), farPlane=terrainVessel ? 5000.0 : (terrainMode ? 200000.0 : (planetMode ? 50000000.0 : 1000000.0));
         double sy=1.0/std::tan(aperture), sx=sy*height/width;
         double a=farPlane/(farPlane-nearPlane), b=-nearPlane*a;
         for(unsigned col=0;col<4;++col) {
@@ -669,6 +675,10 @@ private:
             }
         }
         ++camera_frames_;
+        if(terrainVessel && renders==1) {
+            VESSELSTATUS2 state{}; state.version=2; oapiGetFocusInterface()->GetStatusEx(&state);
+            printf("[core-metal] combined_actual_state status=%d flight_flags=%u longitude=%.17g latitude=%.17g heading=%.17g landed_cog_height=%.17g static_template_only=1\n",state.status,oapiGetFocusInterface()->GetFlightStatus(),state.surf_lng,state.surf_lat,state.surf_hdg,state.vrot.x);
+        }
         // Exact input doubles and computed float matrix; GPU binding logged separately.
         printf("[core-metal] camera_json={\"frame\":%u,\"controlled_view\":%u",renders,controlled_view_);
         auto vector=[](const char *key,const VECTOR3 &v) {
@@ -758,10 +768,15 @@ int main(int argc, char **argv) {
     bool platformInput=false,imguiTest=false,ignoreForward=false;
     bool animationContract=false,gearTest=false,gearFreeze=false,gearCleanupFault=false;
     bool terrainCoast=false,terrainFlat=false,terrainFreeze=false,terrainSwap=false;
+    bool omitVessel=false,omitTerrain=false,disableSceneDepth=false,terrainLast=false;
     bool planetFreeze=false,planetIgnore=false,planetSwap=false;
     while(argc>3) {
         std::string option=argv[argc-1];
-        if(option=="--hidden-present") { if(present) return 2; present=true; --argc; }
+        if(option=="--diagnostic-omit-vessel") { if(omitVessel) return 2; omitVessel=true; --argc; }
+        else if(option=="--diagnostic-omit-terrain") { if(omitTerrain) return 2; omitTerrain=true; --argc; }
+        else if(option=="--diagnostic-disable-scene-depth") { if(disableSceneDepth) return 2; disableSceneDepth=true; --argc; }
+        else if(option=="--diagnostic-terrain-last") { if(terrainLast) return 2; terrainLast=true; --argc; }
+        else if(option=="--hidden-present") { if(present) return 2; present=true; --argc; }
         else if(option=="--terrain-coast") { if(terrainCoast) return 2; terrainCoast=true; --argc; }
         else if(option=="--diagnostic-flat-terrain") { if(terrainFlat) return 2; terrainFlat=true; --argc; }
         else if(option=="--diagnostic-freeze-terrain-transform") { if(terrainFreeze) return 2; terrainFreeze=true; --argc; }
@@ -786,6 +801,7 @@ int main(int argc, char **argv) {
         } else break;
     }
     if (argc < 3 || argc > 6) {
+        fprintf(stderr,"Combined depth: <scenario> <frames> --terrain-vessel-test snapshot.ppm [--diagnostic-omit-vessel|--diagnostic-omit-terrain|--diagnostic-disable-scene-depth|--diagnostic-terrain-last]; actual external camera, KSC patch, static template, no contact-physics claim.\n");
         fprintf(stderr,"Bounded terrain: <scenario> <frames> --terrain-patch|--terrain-patch-test snapshot.ppm [--terrain-coast] [--diagnostic-flat-terrain|--diagnostic-freeze-terrain-transform|--diagnostic-swap-terrain-uv]; fixed engine ground camera, unlit real curved patch, no streaming/contact/flight coverage.\n");
         fprintf(stderr,"Earth orbit-only modes: <scenario> <frames> --planet-surface|--planet-surface-test snapshot.ppm [--diagnostic-freeze-planet-transform|--diagnostic-ignore-planet-sampling|--diagnostic-swap-planet-hemispheres]; hidden/offscreen, unlit h=0 sphere, not elevation terrain.\n");
         fprintf(stderr,"Usage (from content root): orbiter-core-metal <scenario> <frames 1..10000> [--mesh snapshot.ppm | --engine-camera snapshot.ppm | --engine-camera-test snapshot.ppm | --diagnostic-frozen-camera-test snapshot.ppm | --materials snapshot.ppm | --materials-test snapshot.ppm | --materials-reference-test snapshot.ppm | --textures snapshot.ppm | --textures-test snapshot.ppm | --textures-ignore-sampling-test snapshot.ppm] [--hidden-present] [--animation-contract-test | --gear-animation-test | --gear-animation-frozen-test] [--platform-input | --imgui-input-test | --imgui-input-ignore-test | --buffered-input-test | --buffered-input-ignore-test | --session-input | --session-input-test | --session-input-ignore-test]\nSession test modes require a bound of at least 16 frames; all windows remain hidden.\n");
@@ -794,13 +810,17 @@ int main(int argc, char **argv) {
     char *end = nullptr;
     long frames = strtol(argv[2], &end, 10);
     int modeArgc=argc;
-    bool terrain=modeArgc==5 && (std::string(argv[3])=="--terrain-patch" || std::string(argv[3])=="--terrain-patch-test");
+    bool terrainVessel=modeArgc==5 && std::string(argv[3])=="--terrain-vessel-test";
+    if((omitVessel||omitTerrain||disableSceneDepth||terrainLast) && !terrainVessel) return 2;
+    if(omitVessel && omitTerrain) return 2;
+    if(terrainVessel) terrainCoast=true;
+    bool terrain=terrainVessel || (modeArgc==5 && (std::string(argv[3])=="--terrain-patch" || std::string(argv[3])=="--terrain-patch-test"));
     if((terrainCoast||terrainFlat||terrainFreeze||terrainSwap) && !terrain) return 2;
     if(terrain && (session||gearTest||animationContract||present)) return 2;
     bool planet=modeArgc==5 && (std::string(argv[3])=="--planet-surface" || std::string(argv[3])=="--planet-surface-test");
     if((planetFreeze||planetIgnore||planetSwap) && !planet) return 2;
     if(planet && (session||gearTest||animationContract||present)) return 2;
-    bool textures=modeArgc==5 && (std::string(argv[3])=="--textures" || std::string(argv[3])=="--textures-test" || std::string(argv[3])=="--textures-ignore-sampling-test");
+    bool textures=terrainVessel || (modeArgc==5 && (std::string(argv[3])=="--textures" || std::string(argv[3])=="--textures-test" || std::string(argv[3])=="--textures-ignore-sampling-test"));
     if (!end || *end || frames < 1 || frames > 10000 ||
         (modeArgc != 3 && modeArgc != 5) ||
         (modeArgc == 5 && ((!terrain && !planet && !textures && std::string(argv[3]) != "--mesh" && std::string(argv[3]) != "--engine-camera" && std::string(argv[3]) != "--engine-camera-test" && std::string(argv[3]) != "--diagnostic-frozen-camera-test" && std::string(argv[3]) != "--materials" && std::string(argv[3]) != "--materials-test" && std::string(argv[3]) != "--materials-reference-test") || !argv[4][0]))) return 2;
@@ -840,6 +860,8 @@ int main(int argc, char **argv) {
             client = new CoreMetalClient(present, modeArgc == 5 ? argv[4] : "", engineCamera, freezeClip, materials, textures, textures && std::string(argv[3])=="--textures-ignore-sampling-test");
             client->platformInput=platformInput;
             client->terrainMode=terrain; client->terrainCoast=terrainCoast; client->terrainFlat=terrainFlat; client->terrainFreeze=terrainFreeze; client->terrainSwap=terrainSwap;
+            client->terrainVessel=terrainVessel; client->omitVessel=omitVessel; client->omitTerrain=omitTerrain; client->disableSceneDepth=disableSceneDepth; client->terrainLast=terrainLast;
+            if(terrainVessel) printf("[core-metal] combined_scene near=0.5 far=5000 shared_depth_attachment=1 omit_vessel=%u omit_terrain=%u disable_vessel_depth=%u terrain_last=%u static_template=1 contact_physics_claim=0\n",omitVessel,omitTerrain,disableSceneDepth,terrainLast);
             client->planetMode=planet; client->planetFreeze=planetFreeze; client->planetIgnore=planetIgnore; client->planetSwap=planetSwap;
             client->animationContract=animationContract;
             client->gearTest=gearTest; client->gearFreeze=gearFreeze; client->gearSplit=unsigned(frames/2);

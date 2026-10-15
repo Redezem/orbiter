@@ -91,9 +91,81 @@ A CPU radius-scale-float control must demonstrate >0.05 m lost precision while
 anchored local floats retain <0.002 m error. This is a numeric precision control,
 not a claimed float-precision GPU causal negative.
 
-No depth-buffer readback is claimed: actual relief is established by independent
+For these terrain-only modes, no depth-buffer readback is claimed: actual relief is established by independent
 projected geometry, texture pixels and silhouette change. No atmosphere, water,
 shadows, terrain/vessel occlusion, full geographic coverage, dynamic camera flight,
 scientific ephemeris accuracy, contact physics or touchdown accuracy is established.
 The existing focus vessel is loaded for the fixture/lifecycle but not drawn in
 terrain-only mode; it remains drawn normally in all legacy modes.
+
+## Combined real-engine vessel + anchored KSC terrain
+
+```sh
+python3 Src/OrbiterCore/metal/terrain_vessel_regression.py \
+ out/build/macos-core-spike/Src/OrbiterCore/metal/orbiter-core-metal \
+ out/stage/content /Users/redezem/.hermes/cache/scratch/orbiter-terrain-vessel-proof
+```
+
+`<scenario> 12 --terrain-vessel-test /absolute/snapshot.ppm` explicitly draws
+the actual focus-vessel template and the same KSC archive(17,2793,4522) patch.
+No terrain heights, mesh offsets or world/model poses are altered for visibility.
+The private fixture `MetalTerrainVessel.scn` initializes the DG at the exact KSC
+patch midpoint (-80.628662109375,+28.619384765625 degrees), with `STATUS Landed
+Earth`, heading0 and gear0. Actual SDK `CameraMode_Track::TM_RELATIVE` targets the
+real vessel, distance4 vessel sizes, phi2.74/2.04 and theta+.02 radians, FOV40.
+Camera.cpp:260-277 resolves these SDK settings, and Vessel.cpp:3460-3544 owns
+landed initialization. Every frame records actual camera/vessel/body API doubles,
+rotations and bound matrices; production uses no alternate client camera pose.
+
+Both objects use positive-forward Metal projection, common near0.5/far5000 m,
+the same render encoder and the same Depth32Float attachment with Less/write
+enabled. Vessel global-camera subtraction and terrain anchor translation remain
+double precision before local float upload. Existing terrain-only and legacy
+vessel/globe modes retain their original frusta, draw paths and assertions.
+The combined close view can cover the old clear-corner pixel, so only this mode
+uses independent object silhouettes/pixel oracles instead of a clear-corner gate.
+
+Trailing diagnostic-only controls actually omit GPU draws, not image content:
+`--diagnostic-omit-vessel`, `--diagnostic-omit-terrain`. They retain the same
+loaded scenario, camera, geometry and resources. `--diagnostic-terrain-last`
+reverses object order with depth intact. `--diagnostic-disable-scene-depth`
+unbinds the vessel depth test/write state while terrain is drawn first; both
+object draws otherwise remain real. No hidden presentation/session/gear mode is
+combined with this bounded slice. All five renderer lifecycles exit0 with12
+completed pre-UI readbacks, normal ImGui/engine shutdown and zero Metal errors.
+
+The independent oracle reconstructs terrain solely from installed ELE/Elev_mod
+and Surf payloads, uses engine API-uploaded source vessel geometry/material/UV
+and API slot provenance (no second mesh parser), independently Pillow-decodes
+the source DDS, and scalar-projects both from API world poses, not GPU matrices.
+It clips terrain against the common near/far planes and rasterizes fixed integer
+pixel centres with perspective attributes/depth. Geometry-only exclusions cover
+all foreground vessel triangle edges (including just-outside foreground
+triangles), terrain projected edge distances, nearest-texel boundaries and
+near-coplanar Depth32Float layers. Overlap witnesses additionally lie inside a
+2px-eroded independent vessel silhouette. No observed color selects a witness.
+Independent solo silhouettes allow2px raster-boundary tolerance; all safe texture
+samples must match within2 channels. Numeric checks retain every height/level/UV
+and local-float test; only the *screen projection* comparison in close views
+excludes offscreen/behind-eye vertices whose pixel division is ill-conditioned.
+The bound terrain depth clip coordinates are independently checked for every
+vertex, including clipped/offscreen vertices, against the common frustum.
+
+Measured first-view acceptance: **8 terrain-front +101 vessel-front nonedge
+overlap witnesses**, **86895 terrain +543 vessel texture witnesses**, zero channel
+mismatches and zero solo silhouette errors. Reversing object order produces a
+byte-identical real GPU PPM. The depth-disabled renderer still closes normally,
+but the same standalone oracle exits1: all8 selected terrain-front overlap
+witnesses are wrong (472 total safe pixel mismatches including self-occlusion).
+This establishes measured occlusion by independent expected depth ordering and
+actual pixel output, not a claimed depth-buffer readback.
+
+**State/physics limitation:** the real first-render status readback is0/active,
+not landed, despite the scenario's landed initialization. The static template is
+not gear-deformed; its independently measured vertex-to-installed-elevation
+clearance spans -4.98038..+4.79823m. Penetration is retained and explicitly exposed,
+not fixed with renderer offsets or represented as correct contact simulation.
+The installed Earth config declares EarthAtmJ71G; actual engine logs also report
+a missing selected VenusAtm2006 native atmosphere module. No atmosphere/drag,
+touchdown physics, animation, arbitrary flight/camera coverage, streaming/LOD,
+lighting, shadows, HUD or whole-application claim is made.
