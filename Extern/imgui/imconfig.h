@@ -146,17 +146,25 @@ namespace ImGui
 // The ImGui code is stored in the Orbiter SDK so that modules can use it.
 struct ImGuiContext;
 
-#ifdef EXPORT_IMGUI_CONTEXT
+#ifdef _WIN32
+#  ifdef EXPORT_IMGUI_CONTEXT
 extern __declspec(dllexport) struct ImGuiContext* GImGui;  // Current implicit context pointer
-#else
+#  else
 extern __declspec(dllimport) struct ImGuiContext* GImGui;  // Current implicit context pointer
+#  endif
+#else
+extern struct ImGuiContext* GImGui;  // Current implicit context pointer
 #endif
 
 struct ImPlotContext;
-#ifdef EXPORT_IMGUI_CONTEXT
+#ifdef _WIN32
+#  ifdef EXPORT_IMGUI_CONTEXT
 extern __declspec(dllexport) struct ImPlotContext* GImPlot;  // Current implicit context pointer
-#else
+#  else
 extern __declspec(dllimport) struct ImPlotContext* GImPlot;  // Current implicit context pointer
+#  endif
+#else
+extern struct ImPlotContext* GImPlot;  // Current implicit context pointer
 #endif
 #define GImGui GImGui
 #define GImPlot GImPlot

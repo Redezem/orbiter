@@ -203,10 +203,12 @@ DWORD ZTreeMgr::ReadData(DWORD idx, BYTE **outp)
 
 DWORD ZTreeMgr::Inflate(const BYTE *inp, DWORD ninp, BYTE *outp, DWORD noutp)
 {
-	DWORD ndata = noutp;
+	// uLongf is 64-bit on macOS (LP64) but 32-bit on Windows; use the
+	// zlib-native type for the length argument to keep both platforms happy.
+	uLongf ndata = noutp;
 	if (uncompress (outp, &ndata, inp, ninp) != Z_OK)
 		return 0;
-	return ndata;
+	return (DWORD)ndata;
 }
 
 // -----------------------------------------------------------------------

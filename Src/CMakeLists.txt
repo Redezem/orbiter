@@ -13,6 +13,10 @@ if(APPLE AND ORBITER_BUILD_MACOS_APP)
 	add_subdirectory(OrbiterMac)
 endif()
 
+if(ORBITER_BUILD_ORBITER_CORE)
+	add_subdirectory(OrbiterCore)
+endif()
+
 if(ORBITER_BUILD_LEGACY_WIN32)
 	add_subdirectory(Orbiter)
 	add_subdirectory(Orbitersdk)

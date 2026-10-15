@@ -32,6 +32,7 @@ class Star;
 class Elements;
 class Base;
 class TileManager;
+template <class T> class TileManager2; // defined by the graphics client (OVP)
 class SurfTile;
 class CloudTile;
 class ElevationManager;

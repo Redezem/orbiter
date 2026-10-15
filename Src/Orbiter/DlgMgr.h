@@ -14,7 +14,6 @@
 #include "imgui_extras.h"
 class ImGuiDialog;
 
-class oapi::GraphicsClient;
 extern Orbiter *g_pOrbiter;
 
 struct DIALOGENTRY {

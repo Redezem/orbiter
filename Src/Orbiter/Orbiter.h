@@ -18,6 +18,7 @@ class DInput;
 class Config;
 class State;
 class Body;
+class ScriptInterface;
 class Vessel;
 class ScreenNote;
 class DialogManager;

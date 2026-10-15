@@ -220,6 +220,12 @@ option(
 )
 
 option(
+	ORBITER_BUILD_ORBITER_CORE
+	"Build the Orbiter engine core as a native static library (macOS port spike)"
+	OFF
+)
+
+option(
 	ORBITER_BUILD_GDICLIENT
 	"Build the legacy GDI graphics client"
 	${ORBITER_DEFAULT_BUILD_GDICLIENT}

@@ -227,8 +227,12 @@ public:
 
 	void orthogonalise (int axis);
 
-	friend void qrdcmp (Matrix &a, Vector &c, Vector &d, int *sing = 0);
+	friend void qrdcmp (Matrix &a, Vector &c, Vector &d, int *sing);
 	friend void qrsolv (const Matrix &a, const Vector &c, const Vector &d, Vector &b);
+
+	// MSVC tolerated a default argument on the friend declaration above;
+	// portable compilers need an explicit overload instead.
+	friend void qrdcmp (Matrix &a, Vector &c, Vector &d) { qrdcmp(a, c, d, 0); }
 
 	union {
 		double data[9];
@@ -310,8 +314,12 @@ public:
 	inline double operator() (int i, int j) const
 	{ return data[i*4+j]; }
 
-	friend void qrdcmp (Matrix4 &a, Vector4 &c, Vector4 &d, int *sing = 0);
+	friend void qrdcmp (Matrix4 &a, Vector4 &c, Vector4 &d, int *sing);
 	friend void qrsolv (const Matrix4 &a, const Vector4 &c, const Vector4 &d, Vector4 &b);
+
+	// MSVC tolerated a default argument on the friend declaration above;
+	// portable compilers need an explicit overload instead.
+	friend void qrdcmp (Matrix4 &a, Vector4 &c, Vector4 &d) { qrdcmp(a, c, d, 0); }
 	friend void QRFactorize (Matrix4 &A, Vector4 &c, Vector4 &d);
 	friend void RSolve (const Matrix4 &A, const Vector4 &d, Vector4 &b);
 	friend void QRSolve (const Matrix4 &A, const Vector4 &c,

@@ -29,6 +29,10 @@
 
 class HUD;
 class Vessel;
+class DefaultPanel;
+class Panel;
+class VirtualCockpit;
+class MenuInfoBar;
 
 struct MFDspec {        // panel MFD specs
 	Instrument *instr;  // pointer to MFD instance

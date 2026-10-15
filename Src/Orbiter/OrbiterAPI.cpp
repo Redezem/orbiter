@@ -2571,10 +2571,11 @@ DLLEXPORT DWORD oapiDeflate (const BYTE *inp, DWORD ninp, BYTE *outp, DWORD nout
 
 DLLEXPORT DWORD oapiInflate (const BYTE *inp, DWORD ninp, BYTE *outp, DWORD noutp)
 {
-	DWORD ndata = noutp;
+	// uLongf is 64-bit on macOS (LP64); use the zlib type for portability.
+	uLongf ndata = noutp;
 	if (uncompress (outp, &ndata, inp, ninp) != Z_OK)
 		return 0;
-	return ndata;
+	return (DWORD)ndata;
 }
 
 // ------------------------------------------------------------------------------

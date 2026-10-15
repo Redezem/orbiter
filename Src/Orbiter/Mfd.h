@@ -43,7 +43,6 @@ public:
 };
 
 class Pane;
-class oapi::GraphicsClient;
 
 static char work_kstate[256];
 inline char *KstateSet (int key) {
