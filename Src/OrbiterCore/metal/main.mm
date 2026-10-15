@@ -29,6 +29,8 @@
 #include "material_semantics.h"
 #include "metal_textures.h"
 #include "texture_evidence.h"
+#include "session_input.h"
+#include "session_control_probe.h"
 
 extern Orbiter *g_pOrbiter;
 
@@ -215,6 +217,7 @@ public:
         return 0; // Template snapshot only: never claim animation or instance mutation support.
     }
     ~CoreMetalClient() override { release(); }
+    SDL_WindowID windowID() const { return SDL_GetWindowID(window_); }
     bool clbkInitialise() override {
         SDL_SetHint(SDL_HINT_MAC_BACKGROUND_APP, "1");
         if (!SDL_Init(SDL_INIT_VIDEO)) return fail(SDL_GetError());
@@ -618,14 +621,23 @@ private:
 };
 
 int main(int argc, char **argv) {
+    // Independent trailing session/presentation options leave old positional modes intact.
+    bool session=false, sessionTest=false, ignoreInput=false, present=false;
+    while(argc>3) {
+        std::string option=argv[argc-1];
+        if(option=="--hidden-present") { if(present) return 2; present=true; --argc; }
+        else if(option=="--session-input" || option=="--session-input-test" || option=="--session-input-ignore-test") {
+            if(session) return 2;
+            session=true; sessionTest=option!="--session-input"; ignoreInput=option=="--session-input-ignore-test"; --argc;
+        } else break;
+    }
     if (argc < 3 || argc > 6) {
-        fprintf(stderr,"Usage (from content root): orbiter-core-metal <scenario> <frames 1..10000> [--mesh snapshot.ppm | --engine-camera snapshot.ppm | --engine-camera-test snapshot.ppm | --diagnostic-frozen-camera-test snapshot.ppm | --materials snapshot.ppm | --materials-test snapshot.ppm | --materials-reference-test snapshot.ppm | --textures snapshot.ppm | --textures-test snapshot.ppm | --textures-ignore-sampling-test snapshot.ppm] [--hidden-present]\n");
+        fprintf(stderr,"Usage (from content root): orbiter-core-metal <scenario> <frames 1..10000> [--mesh snapshot.ppm | --engine-camera snapshot.ppm | --engine-camera-test snapshot.ppm | --diagnostic-frozen-camera-test snapshot.ppm | --materials snapshot.ppm | --materials-test snapshot.ppm | --materials-reference-test snapshot.ppm | --textures snapshot.ppm | --textures-test snapshot.ppm | --textures-ignore-sampling-test snapshot.ppm] [--hidden-present] [--session-input | --session-input-test | --session-input-ignore-test]\nSession test modes require a bound of at least 16 frames; all windows remain hidden.\n");
         return 2;
     }
     char *end = nullptr;
     long frames = strtol(argv[2], &end, 10);
-    bool present = argc>=4 && std::string(argv[argc-1])=="--hidden-present";
-    int modeArgc=argc-(present ? 1 : 0);
+    int modeArgc=argc;
     bool textures=modeArgc==5 && (std::string(argv[3])=="--textures" || std::string(argv[3])=="--textures-test" || std::string(argv[3])=="--textures-ignore-sampling-test");
     if (!end || *end || frames < 1 || frames > 10000 ||
         (modeArgc != 3 && modeArgc != 5) ||
@@ -636,11 +648,14 @@ int main(int argc, char **argv) {
     bool materialViews=(textures && std::string(argv[3])!="--textures") || (modeArgc==5 && (std::string(argv[3])=="--materials-test" || std::string(argv[3])=="--materials-reference-test"));
     bool cameraTest=modeArgc==5 && (std::string(argv[3])=="--engine-camera-test" || materialViews || freezeClip);
     if(cameraTest && frames<2) return 2;
+    if(sessionTest && frames<16) return 2;
     setvbuf(stdout, nullptr, _IONBF, 0);
     @autoreleasepool {
         g_pOrbiter = new Orbiter;
         CoreMetalClient *client = nullptr;
         bool attached = false, launched = false;
+        std::unique_ptr<core_metal::SessionInput> input;
+        std::unique_ptr<core_metal::SessionControlProbe> controlProbe;
         int result = 1;
         try {
             std::string cmd = "--scenariox=\"" + std::string(argv[1]) + "\"";
@@ -661,17 +676,33 @@ int main(int argc, char **argv) {
             if (!oapiGetFocusInterface()) throw std::runtime_error("no focus vessel");
             printf("[core-metal] focus=%s scenario=%s frames=%ld\n", oapiGetFocusInterface()->GetName(), argv[1], frames);
             client->attachFocusMesh();
+            if(session) {
+                if(!g_pOrbiter->GetDInput()->GetKbdDevice()) throw std::runtime_error("native session has no actual keyboard device");
+                input=std::make_unique<core_metal::SessionInput>(client->windowID(),ignoreInput ? +[](unsigned,bool){} : shim_set_key);
+                input->pump(); // drain startup window notifications before the test schedule
+                if(sessionTest) controlProbe=std::make_unique<core_metal::SessionControlProbe>(client->windowID());
+                printf("[core-metal] session input=held-DIK hidden=1 buffered_commands=unsupported bridge_publication=%u\n",!ignoreInput);
+            }
+            unsigned executed=0;
             for (long i=0; i<frames; ++i) { @autoreleasepool {
+                if(controlProbe) controlProbe->before(static_cast<unsigned>(i));
+                if(input) input->pump();
                 if(cameraTest && (i==0 || i==frames/2)) client->setTestCamera(i==0 ? 1 : 2,materialViews);
                 g_pOrbiter->SingleFrame();
+                ++executed;
+                if(controlProbe) controlProbe->after(static_cast<unsigned>(i),g_pOrbiter->KeyState());
+                if(input && input->quitRequested()) break;
             } }
+            bool controlsOK=!controlProbe || controlProbe->verified();
+            input.reset(); // all held keys released before core/device/world teardown
             client->detachFocusMesh();
             g_pOrbiter->CloseSession();
             launched = false;
-            result = client->verified(static_cast<unsigned>(frames)) ? 0 : 1;
+            result = client->verified(executed) && controlsOK ? 0 : 1;
         } catch (const std::exception &e) {
             fprintf(stderr,"[core-metal] FAIL: %s\n", e.what());
         }
+        input.reset();
         if (launched) { if(client) client->detachFocusMesh(); g_pOrbiter->CloseSession(); }
         if (client) client->report();
         if (attached && !oapiUnregisterGraphicsClient(client)) result = 1;

@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 from PIL import Image
-from material_regression import stage
+from fixture_staging import stage
 from camera_regression import verify_frame, verify_presentation
 from mesh_regression import require
 

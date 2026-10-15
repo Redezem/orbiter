@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
+from fixture_staging import stage
 from mesh_regression import require
 
 
@@ -71,32 +71,7 @@ def verify_presentation(log, frames=12):
 def main():
     executable, content, output = [Path(x).resolve() for x in sys.argv[1:4]]
     output.mkdir(parents=True, exist_ok=True)
-    # Isolated writable launch root: never patch the user's Sol/Smack! content.
-    # Atomically reserve a fresh tree; never reuse/delete an unchecked user path.
-    # Keep it for evidence, including on failure. Output may contain older runs.
-    launch = Path(tempfile.mkdtemp(prefix='content-', dir=output))
-    for source in content.iterdir():
-        if source.name in ('Config', 'Scenarios'):
-            continue
-        destination = launch / source.name
-        # Logs/config/session saves must stay isolated, not follow writable symlinks.
-        if source.is_dir() or source.suffix.lower() == '.dylib':
-            if not destination.exists():
-                destination.symlink_to(source, target_is_directory=source.is_dir())
-        elif source.suffix.lower() == '.cfg' and not destination.exists():
-            destination.write_bytes(source.read_bytes())
-    config = launch / 'Config'
-    config.mkdir(exist_ok=True)
-    for source in (content / 'Config').iterdir():
-        if source.name == 'MetalCamera.cfg':
-            continue  # Reserved fixture: never write through a source-content link.
-        destination = config / source.name
-        if not destination.exists():
-            destination.symlink_to(source, target_is_directory=source.is_dir())
-    (launch / 'Scenarios').mkdir(exist_ok=True)
-    fixtures = Path(__file__).resolve().parent / 'fixtures'
-    (config / 'MetalCamera.cfg').write_bytes((fixtures / 'MetalCamera.cfg').read_bytes())
-    (launch / 'Scenarios' / 'MetalCamera.scn').write_bytes((fixtures / 'MetalCamera.scn').read_bytes())
+    launch = stage(content, output)
     options = sys.argv[4:]
     require(len(options) == len(set(options)) and all(o in ('--negative-control', '--hidden-present') for o in options), 'unknown/duplicate runner option')
     negative = '--negative-control' in options

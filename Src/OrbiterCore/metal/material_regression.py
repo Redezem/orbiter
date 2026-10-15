@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-import tempfile
+from fixture_staging import stage
 from camera_regression import image, verify_frame, verify_presentation
 from mesh_regression import require
 
@@ -45,27 +45,6 @@ def material_image(path, palette):
     require(background > 1000 and len(colors)-background > 1000, 'missing material mesh/background')
     require(material_specific > 100, 'material shader produced no material-specific geometry')
     return pixels, background, colored, material_specific
-
-
-def stage(content, output):
-    launch = Path(tempfile.mkdtemp(prefix='content-', dir=output))
-    for source in content.iterdir():
-        if source.name in ('Config', 'Scenarios'):
-            continue
-        target = launch/source.name
-        if source.is_dir() or source.suffix.lower() == '.dylib':
-            target.symlink_to(source, target_is_directory=source.is_dir())
-        elif source.suffix.lower() == '.cfg':
-            target.write_bytes(source.read_bytes())
-    (launch/'Config').mkdir()
-    for source in (content/'Config').iterdir():
-        if source.name != 'MetalCamera.cfg':
-            (launch/'Config'/source.name).symlink_to(source, target_is_directory=source.is_dir())
-    (launch/'Scenarios').mkdir()
-    fixtures = Path(__file__).with_name('fixtures')
-    for folder, filename in [('Config', 'MetalCamera.cfg'), ('Scenarios', 'MetalCamera.scn')]:
-        (launch/folder/filename).write_bytes((fixtures/filename).read_bytes())
-    return launch
 
 
 def main():

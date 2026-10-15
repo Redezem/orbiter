@@ -22,7 +22,9 @@ initialization/shutdown, normal teardown, and process exit zero.
 This default mode establishes offscreen clear-frame lifecycle only. The separate
 mesh mode below adds static vessel-template rendering, not a full scene renderer.
 Neither establishes terrain rendering, presentation, HUD/MFD/Sketchpad, keyboard
-input, or long-running resource behavior. The bootstrap app remains separate.
+input, or long-running resource behavior. The separate opt-in session bridge below
+adds bounded held-key input verification, not a usable full app. The bootstrap
+app remains separate.
 
 ## Static focus-vessel mesh diagnostic
 
@@ -280,6 +282,87 @@ oracle process exits nonzero. PPMs are pre-UI GPU readbacks, never synthesized
 CPU render evidence. Hidden/offscreen images match; actual scanout remains
 unproven. Scope remains the first static DG diffuse pass, not terrain, HUD,
 Sketchpad, general surfaces, animation or fully lit/transparent vessels.
+
+## Bounded native SDL held-key session bridge
+
+Append `--session-input` to any existing mode to opt into a main-thread SDL event
+pump before each real `Orbiter::SingleFrame`. The existing frame bound (1..10000)
+remains mandatory. All windows remain **hidden and without input focus**; this is
+not a visible launch option, and there is currently no supported visible-session
+command. No window show/raise/activation, OS input injection or global keyboard
+polling is implemented or used. `--hidden-present` still only submits hidden
+Metal drawables and does not establish scanout.
+
+`session_input.{h,cpp}` explicitly maps SDL physical USB scancodes to the SDK's
+DirectInput/OAPI_KEY PC-scancode values, preserving keypad/main-key distinctions
+and independent left/right Ctrl, Shift and Alt. Held state survives frames with
+no repeat event; duplicate down/repeat is idempotent and key-up releases it.
+Foreign-window keys are ignored. Focus-loss, hide, minimize, close, SDL quit,
+new-session construction and teardown clear the entire published device state.
+Close/quit requests finish the current frame and take normal teardown. The host
+checks hidden/no-input-focus flags every rendered frame. The shim callback and
+adapter are single-main-thread owned; no shared worker input state is introduced.
+
+The actual engine route was traced, not assumed: native Create owns DInput;
+`CreateRenderWindow` creates/acquires its keyboard device and activates the
+logical graphics session; `SingleFrame` reaches `UserInput`, which calls the
+shim device's `GetDeviceState`. It copies `shim_kbd_state` into the engine's
+`simkstate`, respects dialogs/module consumption and ImGui keyboard capture, then
+`KbdInputImmediate_OnRunning` resolves the actual keymap. Ctrl+keypad-plus/minus
+calls `Vessel::IncMainRetroLevel` with the real simulation timestep. No core,
+Input.cpp, DirectInput shim, world pose, physics or throttle setter was changed.
+A logically active graphics session is distinct from OS keyboard/window focus.
+
+The explicit **test-only** `--session-input-test` requires a bound of at least
+16 frames and requests quit after the sixteenth actual frame. The runner passes
+a 20-frame bound, independently proving quit ends the host loop early.
+`session_control_probe.h` pushes events only into that process's SDL queue:
+four untouched UI warmup frames, baseline, left-Ctrl/keypad-plus down, another
+held frame with no repeat, release, right-Ctrl plus a duplicate repeat, focus
+loss, foreign-window keys, another press, hide, Ctrl/keypad-minus, release and
+quit. Real engine ImGui briefly wants keyboard capture during startup; warmup
+allows it to settle without bypassing capture or changing core input semantics.
+Every frame logs real `VESSEL::GetThrusterGroupLevel(THGROUP_MAIN)` before/after
+and the engine's actual polled Add/Subtract/left-Ctrl/right-Ctrl state. There are
+no test throttle setters, replacement physics or direct `SendKbdImmediate` calls.
+
+```sh
+cmake --build out/build/macos-core-spike \
+  --target orbiter-core-metal orbiter-session-input-tests -j6
+out/build/macos-core-spike/Src/OrbiterCore/metal/orbiter-session-input-tests
+python3 Src/OrbiterCore/metal/session_regression.py \
+  out/build/macos-core-spike/Src/OrbiterCore/metal/orbiter-core-metal \
+  out/stage/content /Users/redezem/.hermes/cache/scratch/orbiter-session-check
+# Optional: append --hidden-present to repeat with real hidden drawables.
+```
+
+The camera, material, texture and session runners share `fixture_staging.py`.
+It reserves a fresh owned launch tree, real Config/Scenarios directories and
+exclusive fixture files before adding source links. Destination `lexists` checks
+skip filesystem aliases (including case/normalization aliases and dangling
+links), rather than trusting exact filename spelling. Stale output trees are
+never reused or deleted. CPU-only sentinel tests exercise each runner without
+launching graphics:
+
+```sh
+python3 -m unittest discover -s Src/OrbiterCore/metal -p 'test_*.py' -v
+```
+
+The session runner repeats three real-core
+textured 16-frame sessions, independently checks exact polled states and throttle
+increase/hold/release/decrease phases, GPU completion/readback and full normal
+engine/ImGui/resource teardown. `--session-input-ignore-test` is a diagnostic
+negative control: identical real SDL events, but publication to the shim is
+disabled. Its control oracle must fail nonzero after normal teardown. CPU adapter
+tests also poll the actual DI shim device and exercise modifiers, repeats,
+window isolation and all clear/quit paths without initialising SDL video.
+
+This implements **held-key immediate controls only**, not DirectInput buffered
+commands (`GetDeviceData` still returns zero events), SDL-to-ImGui platform input,
+mouse/cockpit interaction, pause/menu/key-command completeness, joystick/gamepad,
+full HUD/MFD/Sketchpad, terrain, animation, alpha blending or general interactive
+app readiness. Existing clear/mesh/camera/material/texture modes do not pump
+session input unless explicitly opted in; their regressions remain separate.
 
 ## Review dispositions
 
