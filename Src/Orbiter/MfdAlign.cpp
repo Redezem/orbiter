@@ -22,7 +22,10 @@ static const Body *last_target = 0;
 // =======================================================================
 // class Instrument_OPlaneAlign
 
-struct Instrument_OPlaneAlign::SavePrm Instrument_OPlaneAlign::saveprm = {0,0,0,0.0,0.0,false};
+// NOTE: initializer order matches SavePrm field order (ptr,ptr,ptr,bool,double,double).
+// The original {0,0,0,0.0,0.0,false} narrowed 0.0->bool and false->double, which
+// MSVC tolerates but clang rejects as -Wc++11-narrowing. All fields are zero either way.
+struct Instrument_OPlaneAlign::SavePrm Instrument_OPlaneAlign::saveprm = {0,0,0,false,0.0,0.0};
 
 Instrument_OPlaneAlign::Instrument_OPlaneAlign (Pane *_pane, INT_PTR _id, const Spec &spec, Vessel *_vessel, bool restore)
 : Instrument (_pane, _id, spec, _vessel)

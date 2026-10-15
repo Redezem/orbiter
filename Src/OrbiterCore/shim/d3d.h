@@ -12,6 +12,33 @@ struct D3DDEVICEDESC7 {
 	DWORD cmDevCaps2;
 };
 
+struct DDCAPS {
+	DWORD dwCaps1;
+	DWORD dwCaps2;
+	DWORD dwZBufferOpCaps;
+	DWORD dwTextureOpCaps;
+};
+
+struct DDSURFACEDESC2 {
+	DWORD dwSize;
+	DWORD dwFlags;
+	DWORD dwHeight;
+	DWORD dwWidth;
+	long lPitch;
+	DWORD dwLinearSize;
+	void *lpSurface;
+	DWORD dwBackBufferCount;
+};
+using LPDDSURFACEDESC2 = DDSURFACEDESC2 *;
+
+struct DDBLTFX {
+	DWORD dwSize;
+	DWORD dwFillColor;
+	DWORD dwColorKey;
+	long yStart;
+	long yEnd;
+};
+
 #ifndef FLOAT
 using FLOAT = float;
 #endif
@@ -59,8 +86,9 @@ struct D3DVECTOR {
 };
 
 struct D3DVERTEX {
-	D3DVECTOR position;
-	D3DVECTOR normal;
+	// Legacy DX6 field names (used by D3dmath.cpp vertex multiply)
+	D3DVALUE x, y, z;
+	D3DVALUE nx, ny, nz;
 	float tu;
 	float tv;
 };

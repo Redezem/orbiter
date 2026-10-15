@@ -13,6 +13,8 @@
 #include <cstring>
 #include <cstdlib>
 #include <chrono>
+#include <thread>
+#include <cwchar>
 #include <strings.h>
 #ifndef __int64_defined
 #define __int64_defined
@@ -103,6 +105,16 @@ using LPDIRECT3D7 = ComReleasable *;
 using LPDIRECT3DDEVICE7 = ComReleasable *;
 using LPDIRECT3DVERTEXBUFFER7 = ComReleasable *;
 
+#ifndef E_INVALIDARG
+#define E_INVALIDARG ((HRESULT)0x80070057L)
+#endif
+#ifndef E_NOINTERFACE
+#define E_NOINTERFACE ((HRESULT)0x80004002L)
+#endif
+#ifndef E_FAIL
+#define E_FAIL ((HRESULT)0x80004005L)
+#endif
+
 inline DWORD GetLastError() { return 0; }
 
 // FormatMessage with ALLOCATE_BUFFER: allocate a small message buffer so
@@ -134,6 +146,97 @@ inline void *LocalFree(void *p) { free(p); return nullptr; }
 #ifndef FormatMessage
 #define FormatMessage FormatMessageA
 #endif
+
+#ifndef HBRUSH
+using HBRUSH = void *;
+#endif
+#ifndef LPBOOL
+using LPBOOL = bool *;
+#endif
+#ifndef HPEN
+using HPEN = void *;
+#endif
+#ifndef HFONT
+using HFONT = void *;
+#endif
+
+struct LOGBRUSH {
+	UINT lbStyle;
+	COLORREF lbColor;
+	long lbLength;
+};
+
+// GDI object creation (Pane.cpp legacy pen/brush init; inert on macOS)
+inline HPEN CreatePen(int style, int width, COLORREF color)
+{ (void)style; (void)width; (void)color; return nullptr; }
+inline HBRUSH CreateBrushIndirect(const LOGBRUSH *lb) { (void)lb; return nullptr; }
+#ifndef NULL_BRUSH
+#define NULL_BRUSH 5
+#endif
+#ifndef TRANSPARENT
+#define TRANSPARENT 1
+#endif
+#ifndef OPAQUE
+#define OPAQUE 2
+#endif
+#ifndef TA_CENTER
+#define TA_CENTER 1
+#endif
+#ifndef TA_LEFT
+#define TA_LEFT 0
+#endif
+#ifndef TA_RIGHT
+#define TA_RIGHT 2
+#endif
+#ifndef TA_TOP
+#define TA_TOP 0
+#endif
+#ifndef TA_BOTTOM
+#define TA_BOTTOM 8
+#endif
+#ifndef TA_BASELINE
+#define TA_BASELINE 24
+#endif
+using HDC = void *;
+inline int SetTextAlign(void *hdc, uint32_t align) { (void)hdc; (void)align; return 0; }
+inline bool MoveToEx(void *hdc, int x, int y, void *lp) { (void)hdc; (void)x; (void)y; (void)lp; return true; }
+inline bool LineTo(void *hdc, int x, int y) { (void)hdc; (void)x; (void)y; return true; }
+inline COLORREF SetTextColor(void *hdc, COLORREF color) { (void)hdc; return color; }
+inline COLORREF SetBkColor(void *hdc, COLORREF color) { (void)hdc; return color; }
+inline int SetBkMode(void *hdc, int mode) { (void)hdc; (void)mode; return 0; }
+inline bool TextOutA(void *hdc, int x, int y, const char *text, int len)
+{ (void)hdc; (void)x; (void)y; (void)text; (void)len; return true; }
+#ifndef TextOut
+#define TextOut TextOutA
+#endif
+inline bool Rectangle(void *hdc, int left, int top, int right, int bottom)
+{ (void)hdc; (void)left; (void)top; (void)right; (void)bottom; return true; }
+
+// Code page conversion (VectorMap.cpp)
+inline int MultiByteToWideChar(UINT codepage, DWORD flags, LPCSTR mb, int mbLen, LPWSTR wide, int wideLen)
+{
+	(void)codepage; (void)flags;
+	if (!mb || mbLen == -1) mbLen = (int)strlen(mb);
+	int n = 0;
+	while (n < mbLen && mb[n]) {
+		if (wide && n < wideLen) wide[n] = (WCHAR)(unsigned char)mb[n];
+		n++;
+	}
+	if (wide && n < wideLen) wide[n] = 0;
+	return n;
+}
+inline int WideCharToMultiByte(UINT codepage, DWORD flags, LPCWSTR wide, int wideLen, LPSTR mb, int mbLen, LPCSTR def, LPBOOL used)
+{
+	(void)codepage; (void)flags; (void)def; (void)used;
+	if (!wide || wideLen == -1) wideLen = (int)wcslen(wide);
+	int n = 0;
+	while (n < wideLen && wide[n]) {
+		if (mb && n < mbLen) mb[n] = (char)wide[n];
+		n++;
+	}
+	if (mb && n < mbLen) mb[n] = 0;
+	return n;
+}
 
 inline HWND GetDesktopWindow() { return nullptr; }
 inline DWORD GetCurrentDirectoryA(DWORD size, char *buffer)
@@ -171,6 +274,10 @@ inline bool timeEndPeriod(UINT p) { (void)p; return true; }
 #ifndef DWORDLONG
 using DWORDLONG = unsigned long long;
 #endif
+#ifndef LPBYTE
+using LPBYTE = unsigned char *;
+#endif
+
 #ifndef ULONG
 using ULONG = unsigned long;
 #endif
@@ -247,6 +354,11 @@ struct GUID {
 	unsigned short Data2;
 	unsigned short Data3;
 	unsigned char Data4[8];
+	inline bool operator==(const GUID &o) const {
+		return Data1 == o.Data1 && Data2 == o.Data2 && Data3 == o.Data3 &&
+		       memcmp(Data4, o.Data4, 8) == 0;
+	}
+	inline bool operator!=(const GUID &o) const { return !(*this == o); }
 };
 #endif
 #ifndef IsEqualGUID
@@ -401,6 +513,9 @@ inline bool DeleteObject(HGDIOBJ obj) { (void)obj; return true; }
 #endif
 #ifndef PASCAL
 #define PASCAL
+#endif
+#ifndef WINAPI
+#define WINAPI
 #endif
 #ifndef CALLBACK
 #define CALLBACK

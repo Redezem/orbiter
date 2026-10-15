@@ -91,7 +91,9 @@ public:
 		MenuItem(MenuItem&& other) noexcept {
 			*this = std::move(other);
 		}
-		MenuItem& MenuItem::operator=(MenuItem&& other) noexcept {
+		// NOTE: 'MenuItem& MenuItem::operator=' is an extra qualification MSVC
+// tolerates but clang rejects; the declaration is identical without it.
+MenuItem& operator=(MenuItem&& other) noexcept {
 			label = std::move(other.label);
 			texture = other.texture;
 			other.texture = NULL;

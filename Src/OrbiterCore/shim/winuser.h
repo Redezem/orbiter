@@ -57,6 +57,12 @@
 #ifndef SWP_NOMOVE
 #define SWP_NOMOVE 0x0002
 #endif
+#ifndef SWP_NOCOPYBITS
+#define SWP_NOCOPYBITS 0x0100
+#endif
+#ifndef LOAD_LIBRARY_AS_DATAFILE
+#define LOAD_LIBRARY_AS_DATAFILE 0x00000002
+#endif
 #ifndef SWP_NOSIZE
 #define SWP_NOSIZE 0x0001
 #endif
@@ -363,7 +369,261 @@ inline HWND GetFocus() { return nullptr; }
 inline HWND SetFocus(HWND hwnd) { (void)hwnd; return nullptr; }
 inline HCURSOR SetCursor(HCURSOR c) { (void)c; return nullptr; }
 inline int ShowCursor(bool show) { (void)show; return 1; }
+#ifndef SM_CXSIZEFRAME
+#define SM_CXSIZEFRAME 32
+#endif
+#ifndef SM_CYSIZEFRAME
+#define SM_CYSIZEFRAME 33
+#endif
+#ifndef SM_CXFIXEDFRAME
+#define SM_CXFIXEDFRAME 7
+#endif
+#ifndef SM_CYFIXEDFRAME
+#define SM_CYFIXEDFRAME 8
+#endif
+#ifndef SM_CXSCREEN
+#define SM_CXSCREEN 0
+#endif
+#ifndef SM_CYSCREEN
+#define SM_CYSCREEN 1
+#endif
 inline int GetSystemMetrics(int idx) { (void)idx; return idx == SM_CXSCREEN ? 1920 : 1080; }
+
+#ifndef WM_SETCURSOR
+#define WM_SETCURSOR 0x0020
+#endif
+#ifndef WM_NCLBUTTONDBLCLK
+#define WM_NCLBUTTONDBLCLK 0x00A3
+#endif
+#ifndef DWLP_USER
+#define DWLP_USER 0x8
+#endif
+#ifndef GWLP_USERDATA
+#define GWLP_USERDATA (-21)
+#endif
+
+inline HWND GetParent(HWND hwnd) { (void)hwnd; return nullptr; }
+inline bool IsChild(HWND parent, HWND child) { (void)parent; (void)child; return false; }
+inline UINT_PTR SetTimer(HWND hwnd, UINT_PTR id, UINT ms, void *proc)
+{ (void)hwnd; (void)id; (void)ms; (void)proc; return id; }
+inline bool KillTimer(HWND hwnd, UINT_PTR id) { (void)hwnd; (void)id; return true; }
+
+#ifndef GWLP_HWNDPARENT
+#define GWLP_HWNDPARENT (-8)
+#endif
+#ifndef IDC_SIZEWE
+#define IDC_SIZEWE MAKEINTRESOURCE(32644)
+#endif
+#ifndef IDC_SIZENS
+#define IDC_SIZENS MAKEINTRESOURCE(32645)
+#endif
+#ifndef IDC_SIZEALL
+#define IDC_SIZEALL MAKEINTRESOURCE(32646)
+#endif
+#ifndef WM_APP
+#define WM_APP 0x8000
+#endif
+#ifndef SM_CYMIN
+#define SM_CYMIN 45
+#endif
+#ifndef SM_CXMIN
+#define SM_CXMIN 44
+#endif
+#ifndef MAKELONG
+#define MAKELONG(l, h) ((long)(((unsigned short)(l) | ((unsigned long)(unsigned short)(h) << 16))))
+#endif
+#ifndef WS_SIZEBOX
+#define WS_SIZEBOX 0x00040000L
+#endif
+#ifndef WS_THICKFRAME
+#define WS_THICKFRAME WS_SIZEBOX
+#endif
+#ifndef SW_SHOWNOACTIVATE
+#define SW_SHOWNOACTIVATE 4
+#endif
+#ifndef SW_SHOW
+#define SW_SHOW 5
+#endif
+#ifndef SW_HIDE
+#define SW_HIDE 0
+#endif
+
+inline HDC GetWindowDC(HWND hwnd) { (void)hwnd; return nullptr; }
+
+#ifndef SIZE_RESTORED
+#define SIZE_RESTORED 0
+#endif
+#ifndef SIZE_MINIMIZED
+#define SIZE_MINIMIZED 1
+#endif
+#ifndef SIZE_MAXIMIZED
+#define SIZE_MAXIMIZED 2
+#endif
+#ifndef WM_SHOWWINDOW
+#define WM_SHOWWINDOW 0x0018
+#endif
+#ifndef WM_DRAWITEM
+#define WM_DRAWITEM 0x0133
+#endif
+#ifndef WM_MEASUREITEM
+#define WM_MEASUREITEM 0x002C
+#endif
+#ifndef ODT_BUTTON
+#define ODT_BUTTON 4
+#endif
+#ifndef ODA_DRAWENTIRE
+#define ODA_DRAWENTIRE 0x0001
+#endif
+#ifndef ODA_SELECT
+#define ODA_SELECT 0x0002
+#endif
+#ifndef ODS_SELECTED
+#define ODS_SELECTED 0x0001
+#endif
+#ifndef ODS_FOCUS
+#define ODS_FOCUS 0x0010
+#endif
+typedef struct tagDRAWITEMSTRUCT {
+    UINT  CtlType;
+    UINT  CtlID;
+    UINT  itemID;
+    UINT  itemAction;
+    UINT  itemState;
+    HWND  hwndItem;
+    HDC   hDC;
+    RECT  rcItem;
+    ULONG_PTR itemData;
+} DRAWITEMSTRUCT, *PDRAWITEMSTRUCT, *LPDRAWITEMSTRUCT;
+#ifndef COLOR_3DFACE
+#define COLOR_3DFACE 15
+#endif
+#ifndef COLOR_WINDOW
+#define COLOR_WINDOW 5
+#endif
+#ifndef PBM_SETRANGE
+#define PBM_SETRANGE (WM_USER + 1)
+#endif
+#ifndef PBM_SETPOS
+#define PBM_SETPOS (WM_USER + 2)
+#endif
+#ifndef PBM_SETMARQUEE
+#define PBM_SETMARQUEE (WM_USER + 10)
+#endif
+#ifndef LB_ADDSTRING
+#define LB_ADDSTRING (WM_USER + 1)
+#endif
+#ifndef LB_INSERTSTRING
+#define LB_INSERTSTRING (WM_USER + 6)
+#endif
+#ifndef LB_DELETESTRING
+#define LB_DELETESTRING (WM_USER + 2)
+#endif
+#ifndef LB_RESETCONTENT
+#define LB_RESETCONTENT (WM_USER + 4)
+#endif
+#ifndef LB_GETCURSEL
+#define LB_GETCURSEL (WM_USER + 5)
+#endif
+#ifndef LB_SETCURSEL
+#define LB_SETCURSEL (WM_USER + 7)
+#endif
+#ifndef LB_GETTEXT
+#define LB_GETTEXT (WM_USER + 3)
+#endif
+#ifndef LB_GETCOUNT
+#define LB_GETCOUNT (WM_USER + 5)
+#endif
+#ifndef ETDT_ENABLE
+#define ETDT_ENABLE 0x0002
+#endif
+#ifndef IDHELP
+#define IDHELP (-9)
+#endif
+#ifndef IDCANCEL
+#define IDCANCEL 2
+#endif
+#ifndef IDOK
+#define IDOK 1
+#endif
+#ifndef SB_CTL
+#define SB_CTL 2
+#endif
+#ifndef SIF_RANGE
+#define SIF_RANGE 0x0001
+#endif
+#ifndef SIF_PAGE
+#define SIF_PAGE 0x0002
+#endif
+#ifndef SIF_POS
+#define SIF_POS 0x0004
+#endif
+#ifndef SIF_DISABLENOSCROLL
+#define SIF_DISABLENOSCROLL 0x0008
+#endif
+#ifndef SIF_ALL
+#define SIF_ALL (SIF_RANGE | SIF_PAGE | SIF_POS)
+#endif
+typedef struct tagSCROLLINFO {
+    UINT cbSize;
+    UINT fMask;
+    int  nMin;
+    int  nMax;
+    UINT nPage;
+    int  nPos;
+    int  nTrackPos;
+} SCROLLINFO, *LPSCROLLINFO;
+
+#ifndef ARRAYSIZE
+#define ARRAYSIZE(a) (sizeof(a) / sizeof((a)[0]))
+#endif
+
+inline bool EnableWindow(HWND hwnd, bool enable) { (void)hwnd; (void)enable; return true; }
+inline bool IsDialogMessage(HWND hwnd, MSG *msg) { (void)hwnd; (void)msg; return false; }
+inline bool IsIconic(HWND hwnd) { (void)hwnd; return false; }
+inline bool ScrollWindow(HWND hwnd, int x, int y, const RECT *clip, const RECT *update)
+{ (void)hwnd; (void)x; (void)y; (void)clip; (void)update; return true; }
+inline int SetScrollInfo(HWND hwnd, int fn, const SCROLLINFO *si, bool redraw)
+{ (void)hwnd; (void)fn; (void)si; (void)redraw; return 0; }
+inline int GetScrollInfo(HWND hwnd, int fn, SCROLLINFO *si)
+{ (void)hwnd; (void)fn; (void)si; return 0; }
+inline HBRUSH CreateSolidBrush(COLORREF color) { (void)color; return nullptr; }
+
+// ShellExecute (used by TabAbout links; inert in the shim build)
+inline void *ShellExecuteA(HWND hwnd, LPCSTR op, LPCSTR file, LPCSTR params, LPCSTR dir, int show)
+{ (void)hwnd; (void)op; (void)file; (void)params; (void)dir; (void)show; return nullptr; }
+#ifndef ShellExecute
+#define ShellExecute ShellExecuteA
+#endif
+
+#ifndef MAKEWPARAM
+#define MAKEWPARAM(l, h) ((WPARAM)(unsigned int)(((unsigned short)(l) | ((unsigned int)(unsigned short)(h) << 16))))
+#endif
+#ifndef MAKELPARAM
+#define MAKELPARAM(l, h) ((LPARAM)(unsigned int)(((unsigned short)(l) | ((unsigned int)(unsigned short)(h) << 16))))
+#endif
+
+// Dialog thread management (legacy Win32 dialog thread; inert on macOS —
+// the Metal client drives its own loop and ImGui dialogs).
+using HANDLE = void *;
+using LPHANDLE = HANDLE *;
+#ifndef INVALID_HANDLE_VALUE
+#define INVALID_HANDLE_VALUE ((HANDLE)(long long)-1)
+#endif
+#ifndef CREATE_THREAD_ERROR
+#define CREATE_THREAD_ERROR ((HANDLE)nullptr)
+#endif
+template <typename StartFn>
+inline HANDLE CreateThread(void *sec, size_t stack, StartFn start, void *arg, DWORD flags, DWORD *tid)
+{ (void)sec; (void)stack; (void)start; (void)arg; (void)flags; if (tid) *tid = 0; return nullptr; }
+inline HANDLE CreateEvent(void *sec, bool manual, bool init, const char *name)
+{ (void)sec; (void)manual; (void)init; (void)name; return nullptr; }
+inline bool PostThreadMessage(DWORD tid, UINT msg, WPARAM wp, LPARAM lp)
+{ (void)tid; (void)msg; (void)wp; (void)lp; return true; }
+inline HANDLE LoadImageA(HINSTANCE inst, LPCSTR name, UINT type, int x, int y, UINT flags)
+{ (void)inst; (void)name; (void)type; (void)x; (void)y; (void)flags; return nullptr; }
+#ifndef LoadImage
+#define LoadImage LoadImageA
+#endif
 inline DWORD GetWindowThreadProcessId(HWND hwnd, DWORD *pid)
 {
 	(void)hwnd;
@@ -372,6 +632,46 @@ inline DWORD GetWindowThreadProcessId(HWND hwnd, DWORD *pid)
 }
 
 // ---- message loop ----
+inline void Sleep(DWORD ms)
+{
+	std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+}
+inline HWND GetConsoleWindow() { return nullptr; }
+inline DWORD GetConsoleProcessList(DWORD *list, DWORD max) { (void)list; (void)max; return 0; }
+
+#ifndef IMAGE_BITMAP
+#define IMAGE_BITMAP 0
+#endif
+#ifndef LR_LOADFROMFILE
+#define LR_LOADFROMFILE 0x0010
+#endif
+#ifndef LR_CREATEDIBSECTION
+#define LR_CREATEDIBSECTION 0x2000
+#endif
+#ifndef STM_SETIMAGE
+#define STM_SETIMAGE 0xF17
+#endif
+
+#ifndef CP_UTF8
+#define CP_UTF8 65001
+#endif
+#ifndef CP_ACP
+#define CP_ACP 0
+#endif
+#ifndef PS_SOLID
+#define PS_SOLID 0
+#endif
+#ifndef PS_NULL
+#define PS_NULL 5
+#endif
+#ifndef BS_SOLID
+#define BS_SOLID 0
+#endif
+#ifndef BS_NULL
+#define BS_NULL 1
+#endif
+// LOGBRUSH is defined in windows.h
+
 #ifndef SC_MONITORPOWER
 #define SC_MONITORPOWER 0xF170
 #endif

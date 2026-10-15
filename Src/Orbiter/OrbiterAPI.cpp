@@ -2124,6 +2124,24 @@ DLLEXPORT bool oapiAcceptDelayedKey (char key, double interval)
 	return true;
 }
 
+#ifdef ORBITER_NO_WIN32_SHELL
+// The Win32 launchpad shell is not built on macOS; these API entry points
+// exist for module compatibility but report "unsupported".
+DLLEXPORT LAUNCHPADITEM_HANDLE oapiRegisterLaunchpadItem (LaunchpadItem *item, LAUNCHPADITEM_HANDLE parent)
+{
+	(void)item; (void)parent; return 0;
+}
+
+DLLEXPORT bool oapiUnregisterLaunchpadItem (LaunchpadItem *item)
+{
+	(void)item; return false;
+}
+
+DLLEXPORT LAUNCHPADITEM_HANDLE oapiFindLaunchpadItem (const char *name, LAUNCHPADITEM_HANDLE parent)
+{
+	(void)name; (void)parent; return 0;
+}
+#else
 DLLEXPORT LAUNCHPADITEM_HANDLE oapiRegisterLaunchpadItem (LaunchpadItem *item, LAUNCHPADITEM_HANDLE parent)
 {
 	return (LAUNCHPADITEM_HANDLE)g_pOrbiter->Launchpad()->RegisterExtraParam (item, (HTREEITEM)parent);
@@ -2138,6 +2156,7 @@ DLLEXPORT LAUNCHPADITEM_HANDLE oapiFindLaunchpadItem (const char *name, LAUNCHPA
 {
 	return g_pOrbiter->Launchpad()->FindExtraParam (name, (HTREEITEM)parent);
 }
+#endif
 
 DLLEXPORT DWORD oapiRegisterCustomCmd (char *label, char *desc, CustomFunc func, void *context)
 {

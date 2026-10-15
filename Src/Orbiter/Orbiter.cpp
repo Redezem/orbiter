@@ -17,7 +17,9 @@
 #include "D3d7util.h"
 #include "D3dmath.h"
 #include "Log.h"
+#ifndef ORBITER_NO_WIN32_SHELL
 #include "console_ng.h"
+#endif
 #include "State.h"
 #include "Astro.h"
 #include "Camera.h"
@@ -29,7 +31,9 @@
 #include "Vessel.h"
 #include "resource.h"
 #include "Orbiter.h"
+#ifndef ORBITER_NO_WIN32_SHELL
 #include "Launchpad.h"
+#endif
 #include "MenuInfoBar.h"
 #include "Dialogs.h"
 #include "DialogWin.h"
@@ -381,6 +385,27 @@ Orbiter::~Orbiter ()
 //-----------------------------------------------------------------------------
 HRESULT Orbiter::Create (HINSTANCE hInstance)
 {
+#ifdef ORBITER_NO_WIN32_SHELL
+	// macOS core: the Win32 launchpad/dialog shell is not built.
+	// Config, keymap, state and script init below are the parts the
+	// engine needs; the front end is the graphics client + ImGui dialogs.
+	if (m_pLaunchpad) return S_OK;
+	{
+		pConfig->Load(MasterConfigFile);
+		strcpy (cfgpath, pConfig->CfgDirPrm.ConfigDir);   cfglen = strlen (cfgpath);
+		if (!keymap.Read ("keymap.cfg")) keymap.Write ("keymap.cfg");
+		pState = new State(); TRACENEW
+		if (pConfig->CfgCmdlinePrm.bFastExit)
+			SetFastExit(true);
+		Instrument::RegisterBuiltinModes();
+		script = new ScriptInterface(this); TRACENEW
+		LoadModules("Modules/Plugin", pConfig->CfgCmdlinePrm.LoadPlugins);
+		LoadModules("Modules/Plugin", pConfig->GetActiveModules());
+		LoadStartupModules();
+		memstat = new MemStat;
+		return S_OK;
+	}
+#else
 	if (m_pLaunchpad) return S_OK; // already created
 
 	HRESULT hr;
@@ -459,6 +484,7 @@ HRESULT Orbiter::Create (HINSTANCE hInstance)
 	memstat = new MemStat;
 	
 	return S_OK;
+#endif // ORBITER_NO_WIN32_SHELL
 }
 
 //-----------------------------------------------------------------------------
@@ -468,7 +494,9 @@ HRESULT Orbiter::Create (HINSTANCE hInstance)
 void Orbiter::SaveConfig ()
 {
 	pConfig->Write (); // save current settings
+#ifndef ORBITER_NO_WIN32_SHELL
 	m_pLaunchpad->WriteExtraParams ();
+#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -487,7 +515,9 @@ VOID Orbiter::CloseApp (bool fast_shutdown)
 		delete pDI;
 		if (memstat) delete memstat;
 		if (pConfig)  delete pConfig;
+#ifndef ORBITER_NO_WIN32_SHELL
 		if (m_pLaunchpad) delete m_pLaunchpad;
+#endif
 		if (hBk) DestroyWindow (hBk);
 		if (pState)   delete pState;
 		if (script) delete script;
@@ -683,7 +713,9 @@ VOID Orbiter::Launch (const char *scenario)
 	HCURSOR hCursor = SetCursor (LoadCursor (NULL, IDC_WAIT));
 	bool have_state = false;
 	pConfig->Write (); // save current settings
+#ifndef ORBITER_NO_WIN32_SHELL
 	m_pLaunchpad->WriteExtraParams ();
+#endif
 
 	if (!have_state && !pState->Read (ScnPath (scenario))) {
 		LOGOUT_ERR ("Scenario not found: %s", scenario);
@@ -708,7 +740,9 @@ HWND Orbiter::CreateRenderWindow (Config *pCfg, const char *scenario)
 	LOGOUT("");
 	LOGOUT("**** Creating simulation session");
 
+#ifndef ORBITER_NO_WIN32_SHELL
 	m_pLaunchpad->Hide(); // hide launchpad dialog while the render window is visible
+#endif
 	
 	if (gclient) {
 		if(pState->SplashScreen())
@@ -717,7 +751,11 @@ HWND Orbiter::CreateRenderWindow (Config *pCfg, const char *scenario)
 		GetRenderParameters ();
 	} else {
 		hRenderWnd = NULL;
+#ifdef ORBITER_NO_WIN32_SHELL
+		m_pConsole = NULL; // Win32 console server mode not built on macOS
+#else
 		m_pConsole = new orbiter::ConsoleNG(this);
+#endif
 	}
 
 	pDI->SetRenderWindow(hRenderWnd);
@@ -747,9 +785,8 @@ HWND Orbiter::CreateRenderWindow (Config *pCfg, const char *scenario)
 
 		// playback screen annotation manager
 		snote_playback = gclient->clbkCreateAnnotation ();
-	}
-	else {
-		pDlgMgr = new DialogManager(this, m_pConsole->WindowHandle());
+	} else {
+		pDlgMgr = new DialogManager(this, hRenderWnd);
 	}
 
 	// read simulation environment state
@@ -857,8 +894,10 @@ HWND Orbiter::CreateRenderWindow (Config *pCfg, const char *scenario)
 		Pause (TRUE);
 	}
 
+#ifndef ORBITER_NO_WIN32_SHELL
 	if (m_pConsole)
 		m_pConsole->EchoIntro();
+#endif
 
 	// suppress throttle update on launch
 	if (pDI->joyprop.bThrottle && pCfg->CfgJoystickPrm.bThrottleIgnore) {
@@ -911,8 +950,10 @@ void Orbiter::CloseSession ()
 	}
 
 	if (pConfig->CfgDebugPrm.ShutdownMode == 0 && !bFastExit) { // normal cleanup
+#ifndef ORBITER_NO_WIN32_SHELL
 		m_pLaunchpad->Show(); // show launchpad dialog again
 		m_pLaunchpad->ShowWaitPage (true, simheapsize);
+#endif
 		if (gclient) {
 			gclient->clbkCloseSession (false);
 			Base::DestroyStaticDeviceObjects ();
@@ -942,7 +983,9 @@ void Orbiter::CloseSession ()
 		pDI->DestroyDevices();
 		pDI->SetRenderWindow(NULL);
 
+#ifndef ORBITER_NO_WIN32_SHELL
 		m_pLaunchpad->ShowWaitPage (false);
+#endif
 	} else {
 		if (pDlgMgr)  { delete pDlgMgr; pDlgMgr = 0; }
 		if (gclient) {
@@ -1047,11 +1090,16 @@ INT Orbiter::Run ()
             bGotMsg = GetMessage (&msg, NULL, 0U, 0U);
 		}
         if (bGotMsg) {
-			if (!m_pLaunchpad || !m_pLaunchpad->ConsumeMessage(&msg)) {
-				TranslateMessage (&msg);
-				DispatchMessage (&msg);
-			}
-		} else {
+        #ifdef ORBITER_NO_WIN32_SHELL
+        	TranslateMessage (&msg);
+        	DispatchMessage (&msg);
+        #else
+        	if (!m_pLaunchpad || !m_pLaunchpad->ConsumeMessage(&msg)) {
+        		TranslateMessage (&msg);
+        		DispatchMessage (&msg);
+        	}
+        #endif
+        } else {
 			if (bSession) {
 				if (bAllowInput) bActive = true, bAllowInput = false;
 				if (BeginTimeStep (bRunning)) {
@@ -1065,8 +1113,10 @@ INT Orbiter::Run ()
 						CaptureVideoFrame ();
 					}
 				}
+#ifndef ORBITER_NO_WIN32_SHELL
 				if (m_pConsole)
 					m_pConsole->ParseCmd();
+#endif
 			}
         }
 		if (bRenderOnce && bVisible) {
@@ -1323,11 +1373,13 @@ bool Orbiter::KillVessels ()
 			//if (gclient) gclient->clbkDialogBroadcast (MSG_KILLVESSEL, vessel);
 			if (pDlgMgr) pDlgMgr->BroadcastMessage (MSG_KILLVESSEL, vessel);
 			// echo deletion on console window
+#ifndef ORBITER_NO_WIN32_SHELL
 			if (m_pConsole) {
 				char cbuf[256];
 				sprintf (cbuf, "Vessel %s deleted", vessel->Name());
 				m_pConsole->Echo(cbuf);
 			}
+#endif
 			// kill the vessel
 			g_psys->DelVessel (vessel);
 		}
@@ -1377,11 +1429,13 @@ void Orbiter::SetWarpFactor (double warp, bool force, double delay)
 			//	g_psys->GetVessel(i)->FRecorder_SaveEvent ("TACC", cbuf);
 		}
 	}
+#ifndef ORBITER_NO_WIN32_SHELL
 	if (m_pConsole) {
 		char cbuf[256];
 		sprintf (cbuf, "Time acceleration set to %0.1f", warp);
 		m_pConsole->Echo(cbuf);
 	}
+#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -2720,7 +2774,9 @@ bool Orbiter::RegisterWindow (HINSTANCE hInstance, HWND hWnd, DWORD flag)
 
 void Orbiter::UpdateDeallocationProgress()
 {
+#ifndef ORBITER_NO_WIN32_SHELL
 	m_pLaunchpad->UpdateWaitProgress();
+#endif
 }
 
 HWND Orbiter::OpenDialog (int id, DLGPROC pDlg, void *context)
@@ -2753,7 +2809,9 @@ void Orbiter::OpenHelp (const HELPCONTEXT *hcontext)
 
 void Orbiter::OpenLaunchpadHelp (HELPCONTEXT *hcontext)
 {
+#ifndef ORBITER_NO_WIN32_SHELL
 	::OpenHelp (0, hcontext->helpfile, hcontext->topic);
+#endif
 }
 
 HELPCONTEXT Orbiter::DefaultHelpPage(const char* topic)

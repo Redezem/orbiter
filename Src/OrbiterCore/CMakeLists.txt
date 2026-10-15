@@ -43,10 +43,77 @@ set(ORB_CORE_SRC
 	${CMAKE_SOURCE_DIR}/Src/Orbiter/Util.cpp
 	${CMAKE_SOURCE_DIR}/Src/Orbiter/Log.cpp
 	${CMAKE_SOURCE_DIR}/Src/Orbiter/cmdline.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/Keymap.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/Memstat.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/ConsoleManager.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/Help.cpp
+
+	# Input / navigation / rendering support
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/Input.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/Nav.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/Shadow.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/LightEmitter.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/PlaybackEd.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/VectorMap.cpp
+
+	# Panes / panels / MFDs
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/Pane.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/Panel.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/Panel2D.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/Defpanel.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/hud.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/MenuInfoBar.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/VCockpit.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/Mfd.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/MfdAlign.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/MfdComms.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/MfdDocking.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/MfdHsi.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/MfdLanding.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/MfdMap.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/MfdMap_old.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/MfdOrbit.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/MfdSurface.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/MfdSync.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/MfdTransfer.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/MfdUser.cpp
+
+	# Dialog manager + ImGui dialogs (the engine's ImGui front end)
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/DlgMgr.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/Select.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/DialogWin.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/CustomControls.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/DlgCamera.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/DlgCapture.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/DlgFocus.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/DlgFunction.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/DlgHelp.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/DlgInfo.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/DlgMap.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/DlgMenuCfg.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/DlgOptions.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/DlgRecorder.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/DlgTacc.cpp
+	# NOTE: console_ng.cpp (Win32 console server mode) is excluded from the
+	# macOS core for now; a native headless console mode is a later task.
+
+	# NOTE: the legacy Win32 launchpad shell (Launchpad, LpadTab, Tab*,
+	# OptionsPages) is deliberately EXCLUDED from the macOS core — it is the
+	# Windows-only launcher front end. Orbiter.cpp guards its references
+	# under ORBITER_NO_WIN32_SHELL; the macOS front end is the Metal client
+	# + the ImGui dialogs above.
 
 	# Engine main + module system
 	${CMAKE_SOURCE_DIR}/Src/Orbiter/Orbiter.cpp
 	${CMAKE_SOURCE_DIR}/Src/Orbiter/Script.cpp
+
+	# macOS input bridge backing the DirectInput shim
+	${CMAKE_CURRENT_SOURCE_DIR}/shim/shim_input.cpp
+
+	# Graphics utils (engine-side helpers shared with clients)
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/D3d7util.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/D3dmath.cpp
+	${CMAKE_SOURCE_DIR}/Src/Orbiter/Di7frame.cpp
 
 	# API implementations
 	${CMAKE_SOURCE_DIR}/Src/Orbiter/OrbiterAPI.cpp
@@ -60,12 +127,23 @@ set(ORB_CORE_SRC
 
 add_library(OrbiterCore STATIC ${ORB_CORE_SRC})
 
+# Engine core builds without the Win32 launchpad/dialog shell (macOS path)
+target_compile_definitions(OrbiterCore PRIVATE ORBITER_NO_WIN32_SHELL)
+
+# Generate about.hpp (build signature header) like the Windows Orbiter target does
+string(TIMESTAMP ORB_DATE "%d %b %Y")
+string(TIMESTAMP ORB_VERSION "%y%m%d")
+configure_file(${CMAKE_SOURCE_DIR}/Src/Orbiter/about.hpp.in ${CMAKE_CURRENT_BINARY_DIR}/about.hpp @ONLY)
+
 target_include_directories(OrbiterCore PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/shim
+	${CMAKE_CURRENT_BINARY_DIR}
 	${CMAKE_SOURCE_DIR}/Src/Orbiter
 	${CMAKE_SOURCE_DIR}/Orbitersdk/include
 	${CMAKE_SOURCE_DIR}/OVP
 	${CMAKE_SOURCE_DIR}/Src/Platform
+	${imgui_SOURCE_DIR}
+	${implot_SOURCE_DIR}
 	${TRACY_CLIENT_INCLUDE}
 )
 
