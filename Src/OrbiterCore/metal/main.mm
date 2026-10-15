@@ -39,6 +39,7 @@
 #include "gear_visual.h"
 #include "planet_surface.h"
 #include "terrain_patch.h"
+#include "preview_startup.h"
 
 extern Orbiter *g_pOrbiter;
 
@@ -294,18 +295,21 @@ public:
     DWORD_PTR lastVisualContext=0;
     unsigned visualEventCount() const { return unsupported_visual_events; }
     ~CoreMetalClient() override { release(); }
-    bool platformInput=false;
+    bool platformInput=false, visiblePreview=false;
+    void updatePreviewTitle() {
+        SDL_SetWindowTitle(window_,oapiGetPause() ? "Orbiter Core Preview — PAUSED; Ctrl+P resume — fixed KSC patch" : "Orbiter Core Preview — RUNNING; Ctrl+P pause — fixed KSC patch");
+    }
     SDL_WindowID windowID() const { return SDL_GetWindowID(window_); }
     bool clbkInitialise() override {
-        SDL_SetHint(SDL_HINT_MAC_BACKGROUND_APP, "1");
+        SDL_SetHint(SDL_HINT_MAC_BACKGROUND_APP, visiblePreview ? "0" : "1");
         if(platformInput) {
             SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER,"1");
             SDL_SetHint(SDL_HINT_MOUSE_AUTO_CAPTURE,"0");
         }
         if (!SDL_Init(SDL_INIT_VIDEO)) return fail(SDL_GetError());
         sdl_ = true;
-        window_ = SDL_CreateWindow("Orbiter core Metal probe", width, height,
-                                  SDL_WINDOW_METAL | SDL_WINDOW_HIDDEN);
+        window_ = SDL_CreateWindow(visiblePreview ? "Orbiter Core Preview — paused; Ctrl+P resume — fixed KSC patch" : "Orbiter core Metal probe", width, height,
+                                  SDL_WINDOW_METAL | (visiblePreview ? 0 : SDL_WINDOW_HIDDEN));
         if (!window_) return fail(SDL_GetError());
         view_ = SDL_Metal_CreateView(window_);
         if (!view_) return fail(SDL_GetError());
@@ -335,8 +339,8 @@ public:
             if (!mesh_oracle_) return fail("mesh oracle texture unavailable");
         }
         printf("[core-metal] scene_source=%s pre_ui_oracle=%s\n",present_ ? "drawable" : "offscreen", engine_camera_ ? (present_ ? "drawable" : "offscreen") : "none");
-        printf("[core-metal] device=%s mode=%s hidden=1\n", device_.name.UTF8String,
-               present_ ? "hidden-present" : "offscreen");
+        printf("[core-metal] device=%s mode=%s hidden=%u\n", device_.name.UTF8String,
+               visiblePreview ? "visible-preview" : (present_ ? "hidden-present" : "offscreen"),!visiblePreview);
         return true;
     }
     bool clbkFullscreenMode() const override { return false; }
@@ -431,7 +435,7 @@ public:
     bool verified(unsigned n) const {
         return updates == n && renders == n && newframes == n && drawdata == n &&
                displays == n && completed == n && errors == 0 && readbacks == n &&
-               scheduled == (present_ ? n : 0) && acquired == scheduled && hidden_checks == n && creates == 1 && closes == 1 && destroys == 1 &&
+               scheduled == (present_ ? n : 0) && acquired == scheduled && hidden_checks == (visiblePreview ? 0 : n) && creates == 1 && closes == 1 && destroys == 1 &&
                imgui_init == 1 && imgui_shutdown == 1 &&
                (snapshot_.empty() || (uploaded_meshes > 0 && uploaded_triangles > 0 &&
                  (terrainVessel ? terrain_draw_calls==(omitTerrain?0:n) && mesh_draw_calls==(omitVessel?0:n) : (terrainMode ? terrain_draw_calls==n && mesh_draw_calls==0 : mesh_draw_calls == n && drawn_triangles == uploaded_triangles*n)) &&
@@ -462,9 +466,9 @@ protected:
     void clbkRenderScene() override {
         ++renders;
         check(newframes == renders && displays + 1 == renders, "newframe/render order");
-        check((SDL_GetWindowFlags(window_) & SDL_WINDOW_HIDDEN) &&
+        if(!visiblePreview) { check((SDL_GetWindowFlags(window_) & SDL_WINDOW_HIDDEN) &&
               !(SDL_GetWindowFlags(window_) & SDL_WINDOW_INPUT_FOCUS), "probe window visible/focused");
-        ++hidden_checks;
+        ++hidden_checks; }
         if(textures_) for(const auto &range:texture_ranges_)
             check(!range.handle || texture_store_->lookup(range.handle),"stale/foreign texture draw handle");
         if(gear_) gear_->update(renders,gearSplit,gearFreeze); // after actual engine step, before draw
@@ -763,6 +767,9 @@ private:
 };
 
 int main(int argc, char **argv) {
+    core_metal::PreviewStartup preview;
+    try { preview.prepare(argc,argv); }
+    catch(const std::exception &e) { fprintf(stderr,"[core-preview] startup failed: %s\n",e.what()); return 2; }
     // Independent trailing session/presentation options leave old positional modes intact.
     bool session=false, sessionTest=false, ignoreInput=false, present=false, bufferedTest=false, ignoreBuffer=false;
     bool platformInput=false,imguiTest=false,ignoreForward=false;
@@ -814,9 +821,10 @@ int main(int argc, char **argv) {
     if((omitVessel||omitTerrain||disableSceneDepth||terrainLast) && !terrainVessel) return 2;
     if(omitVessel && omitTerrain) return 2;
     if(terrainVessel) terrainCoast=true;
+    if(preview.active) { session=true; platformInput=true; present=true; }
     bool terrain=terrainVessel || (modeArgc==5 && (std::string(argv[3])=="--terrain-patch" || std::string(argv[3])=="--terrain-patch-test"));
     if((terrainCoast||terrainFlat||terrainFreeze||terrainSwap) && !terrain) return 2;
-    if(terrain && (session||gearTest||animationContract||present)) return 2;
+    if(terrain && (session||gearTest||animationContract||present) && !preview.active) return 2;
     bool planet=modeArgc==5 && (std::string(argv[3])=="--planet-surface" || std::string(argv[3])=="--planet-surface-test");
     if((planetFreeze||planetIgnore||planetSwap) && !planet) return 2;
     if(planet && (session||gearTest||animationContract||present)) return 2;
@@ -829,6 +837,7 @@ int main(int argc, char **argv) {
     bool materials=textures || (modeArgc==5 && (std::string(argv[3])=="--materials" || std::string(argv[3])=="--materials-test"));
     bool materialViews=(textures && std::string(argv[3])!="--textures") || (modeArgc==5 && (std::string(argv[3])=="--materials-test" || std::string(argv[3])=="--materials-reference-test"));
     bool cameraTest=modeArgc==5 && (std::string(argv[3])=="--terrain-patch-test" || std::string(argv[3])=="--planet-surface-test" || std::string(argv[3])=="--engine-camera-test" || materialViews || freezeClip);
+    if(preview.active) cameraTest=false; // initial tracked DG view only; subsequent pose is engine-owned
     if(cameraTest && frames<2) return 2;
     if(sessionTest && frames<16) return 2;
     if(bufferedTest && frames<19) return 2;
@@ -858,6 +867,7 @@ int main(int argc, char **argv) {
             g_pOrbiter->SetFastExit(false);
             if(terrain) { g_pOrbiter->Cfg()->CfgVisualPrm.ElevMode=2; g_pOrbiter->Cfg()->CfgPRenderPrm.TileLoadFlags=2; }
             client = new CoreMetalClient(present, modeArgc == 5 ? argv[4] : "", engineCamera, freezeClip, materials, textures, textures && std::string(argv[3])=="--textures-ignore-sampling-test");
+            client->visiblePreview=preview.active && !preview.hidden;
             client->platformInput=platformInput;
             client->terrainMode=terrain; client->terrainCoast=terrainCoast; client->terrainFlat=terrainFlat; client->terrainFreeze=terrainFreeze; client->terrainSwap=terrainSwap;
             client->terrainVessel=terrainVessel; client->omitVessel=omitVessel; client->omitTerrain=omitTerrain; client->disableSceneDepth=disableSceneDepth; client->terrainLast=terrainLast;
@@ -875,33 +885,57 @@ int main(int argc, char **argv) {
             if (!oapiGetFocusInterface()) throw std::runtime_error("no focus vessel");
             printf("[core-metal] focus=%s scenario=%s frames=%ld\n", oapiGetFocusInterface()->GetName(), argv[1], frames);
             client->attachFocusMesh();
+            if(preview.active) { g_pOrbiter->Pause(true); printf("[core-preview] engine Pause(true); Ctrl+P toggles real engine pause; static DG mesh, no gear animation\n"); }
             if(animationContract) core_metal::probeAnimationContract(*client);
             if(gearTest) client->setTestCamera(1);
             if(session) {
                 if(!g_pOrbiter->GetDInput()->GetKbdDevice()) throw std::runtime_error("native session has no actual keyboard device");
-                input=std::make_unique<core_metal::SessionInput>(client->windowID(),ignoreInput ? +[](unsigned,bool){} : (ignoreBuffer ? shim_set_key_state_only : shim_set_key),platformInput && !ignoreForward ? core_metal::processImGuiEvent : nullptr);
+                auto publisher=ignoreInput ? +[](unsigned,bool){} : (ignoreBuffer ? shim_set_key_state_only : shim_set_key);
+                if(preview.active) publisher=+[](unsigned key,bool down) {
+                    // Deliberately bounded preview contract: flight keypad, modifiers,
+                    // and Ctrl+P only. No save/dialog/gear shortcuts or text entry.
+                    if((key>=0x47 && key<=0x53) || key==0x37 || key==0xb5 ||
+                       key==0x19 || key==0x1d || key==0x9d || key==0x2a || key==0x36)
+                        shim_set_key(key,down);
+                };
+                input=std::make_unique<core_metal::SessionInput>(client->windowID(),publisher,platformInput && !ignoreForward ? core_metal::processImGuiEvent : nullptr);
                 input->pump(); // drain startup window notifications before the test schedule
                 if(imguiTest) imguiProbe=std::make_unique<core_metal::ImGuiInputProbe>(client->windowID());
                 if(bufferedTest) bufferedProbe=std::make_unique<core_metal::BufferedControlProbe>(client->windowID());
                 if(sessionTest) controlProbe=std::make_unique<core_metal::SessionControlProbe>(client->windowID());
-                printf("[core-metal] session input=held-DIK hidden=1 buffered_commands=bounded-transitions bridge_publication=%u buffered_publication=%u\n",!ignoreInput,!ignoreBuffer);
+                printf("[core-metal] session input=held-DIK hidden=%u buffered_commands=bounded-transitions bridge_publication=%u buffered_publication=%u\n",!client->visiblePreview,!ignoreInput,!ignoreBuffer);
             }
             unsigned executed=0;
-            for (long i=0; i<frames; ++i) { @autoreleasepool {
+            for (long i=0; preview.active || i<frames; ++i) { @autoreleasepool {
+                if(preview.active && preview.hidden && i==frames) {
+                    SDL_Event event{}; event.type=SDL_EVENT_QUIT;
+                    if(!SDL_PushEvent(&event)) throw std::runtime_error("self-test quit enqueue failed");
+                    printf("[core-preview] self-test process-local SDL quit; no key injection\n");
+                }
                 if(controlProbe) controlProbe->before(static_cast<unsigned>(i));
                 if(bufferedProbe) bufferedProbe->before(static_cast<unsigned>(i));
                 if(imguiProbe) imguiProbe->before(static_cast<unsigned>(i));
                 if(input) input->pump();
+                if(preview.active && input->quitRequested()) break;
                 if(cameraTest && (i==0 || i==frames/2)) client->setTestCamera(i==0 ? 1 : 2,materialViews);
                 if(imguiProbe) imguiProbe->beforeEngine();
                 g_pOrbiter->SingleFrame();
+                if(preview.active) {
+                    if(preview.hidden && !oapiGetPause()) throw std::runtime_error("preview did not remain actually paused");
+                    if(!preview.hidden) client->updatePreviewTitle();
+                }
                 ++executed;
                 if(controlProbe) controlProbe->after(static_cast<unsigned>(i),g_pOrbiter->KeyState());
                 if(bufferedProbe) bufferedProbe->after(static_cast<unsigned>(i),g_pOrbiter->KeyState());
                 if(imguiProbe) imguiProbe->after(static_cast<unsigned>(i),g_pOrbiter->KeyState());
                 if(input && input->quitRequested()) break;
+                if(preview.active) SDL_Delay(16);
             } }
             bool controlsOK=(!controlProbe || controlProbe->verified()) && (!bufferedProbe || bufferedProbe->verified()) && (!imguiProbe || imguiProbe->verified());
+            if(preview.active && preview.hidden) {
+                controlsOK &= executed==unsigned(frames) && input->quitRequested();
+                printf("[core-preview] bounded frames=%u real_pause=%u SDL_quit=%u\n",executed,oapiGetPause(),input->quitRequested());
+            }
             imguiProbe.reset();
             input.reset(); // all held keys released before core/device/world teardown
             if(platformInput) {

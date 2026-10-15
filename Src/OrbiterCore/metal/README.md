@@ -1,5 +1,9 @@
 # Real-core Metal lifecycle probe
 
+A separate opt-in native application bundle and its hidden acceptance path are
+now documented in [PREVIEW.md](PREVIEW.md). It is a bounded real-core KSC/DG
+preview, not the bootstrap app or full simulator; visible launch is user-only.
+
 This opt-in executable is separate from the bootstrap macOS application.
 It registers an actual GraphicsClient and runs the real Orbiter scenario/core loop.
 
