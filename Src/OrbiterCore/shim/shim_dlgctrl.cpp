@@ -31,5 +31,39 @@ int oapiSetGaugePos (HWND hCtrl, int pos, bool redraw)
 	return 0;
 }
 
+void oapiSetGaugeRange (HWND hCtrl, int rmin, int rmax, bool redraw)
+{
+	(void)hCtrl; (void)rmin; (void)rmax; (void)redraw;
+}
+
+int oapiIncGaugePos (HWND hCtrl, int dpos, bool redraw)
+{
+	(void)hCtrl; (void)dpos; (void)redraw;
+	return 0;
+}
+
+int oapiGetGaugePos (HWND hCtrl)
+{
+	(void)hCtrl;
+	return 0;
+}
+
+void oapiSetSwitchParams (HWND hCtrl, SWITCHPARAM *sp, bool redraw)
+{
+	(void)hCtrl; (void)sp; (void)redraw;
+}
+
+int oapiSetSwitchState (HWND hCtrl, int state, bool redraw)
+{
+	(void)hCtrl; (void)state; (void)redraw;
+	return 0;
+}
+
+int oapiGetSwitchState (HWND hCtrl)
+{
+	(void)hCtrl;
+	return 0;
+}
+
 // Legacy ABI placeholder declared in OrbiterAPI.h
 void dummy() {}

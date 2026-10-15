@@ -247,6 +247,14 @@
 #define WS_VISIBLE 0x10000000L
 #endif
 
+#ifndef _WIN32
+// Legacy vessel panel code loads GDI bitmaps from module .rc resources.
+// Native builds have no Win32 GDI; resource-backed control surfaces are
+// unavailable here. DDS-backed panel textures use a separate loading path.
+inline HBITMAP LoadBitmap (HINSTANCE, LPCSTR) { return NULL; }
+inline HBITMAP LoadBitmapW (HINSTANCE, LPCWSTR) { return NULL; }
+#endif
+
 #ifndef MAKEINTRESOURCE
 #define MAKEINTRESOURCE(i) (reinterpret_cast<LPCSTR>((uintptr_t)(i)))
 #endif

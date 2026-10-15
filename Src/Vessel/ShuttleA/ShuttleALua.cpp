@@ -114,7 +114,7 @@ Raise or lower the Shuttles gear.
 - action == 2 : raises the gear,  
 - action == 3 : lowers the gear.
 */
-static int lua_gear (lua_State *L)
+int lua_gear (lua_State *L)
 {
 	ShuttleA *sh = lua_toShuttleA (L, 1);
 	int action = lua_tointeger (L, 2);
@@ -130,7 +130,7 @@ Set the layout of the ADI ball.
 - layout == 0 : pitch range -90..90,  
 - layout == 1 : pitch range  0..360.
 */
-static int set_adilayout (lua_State *L)
+int set_adilayout (lua_State *L)
 {
 	ShuttleA *sh = lua_toShuttleA (L, 1);
 	int layout = lua_tointeger (L, 2);
@@ -148,7 +148,7 @@ Set the attitude reference mode.
 - mode == 3 : local horizon,  
 - mode >= 4 : NAV receiver #(N-4).
 */
-static int set_attrefmode (lua_State *L)
+int set_attrefmode (lua_State *L)
 {
 	ShuttleA *sh = lua_toShuttleA (L, 1);
 	int mode = lua_tointeger (L, 2);
@@ -165,7 +165,7 @@ Set the attitude reference target mode.
 - mode == 2 : direction of current NAV source,  
 - mode == 3 : relative velocity of current NAV source.
 */
-static int set_attreftgtmode (lua_State *L)
+int set_attreftgtmode (lua_State *L)
 {
 	ShuttleA *sh = lua_toShuttleA (L, 1);
 	int mode = lua_tointeger (L, 2);
@@ -178,7 +178,7 @@ Set the attitude reference offset.
 @function set_attrefoffset
 @tparam VECTOR3 ofs Attitude reference offset.
 */
-static int set_attrefoffset (lua_State *L)
+int set_attrefoffset (lua_State *L)
 {
 	ShuttleA *sh = lua_toShuttleA (L, 1);
 	VECTOR3 ofs = lua_tovector (L, 2);
@@ -191,7 +191,7 @@ Set the attitude target offset.
 @function set_atttgtoffset
 @tparam VECTOR3 ofs Attitude target offset.
 */
-static int set_atttgtoffset (lua_State *L)
+int set_atttgtoffset (lua_State *L)
 {
 	ShuttleA *sh = lua_toShuttleA (L, 1);
 	VECTOR3 ofs = lua_tovector (L, 2);
@@ -206,7 +206,7 @@ Set the attitude offset mode.
 - mode == 0 : Attitude offset mode 0,  
 - mode == 1 : Attitude offset mode 1.
 */
-static int set_attoffsetmode (lua_State *L)
+int set_attoffsetmode (lua_State *L)
 {
 	ShuttleA *sh = lua_toShuttleA (L, 1);
 	int mode = lua_tointeger (L, 2);
@@ -221,7 +221,7 @@ Set the attitude target frame mode.
 - mode == 0 : Attitude target frame mode 0,  
 - mode == 1 : Attitude target frame mode 1.
 */
-static int set_atttgtframemode (lua_State *L)
+int set_atttgtframemode (lua_State *L)
 {
 	ShuttleA *sh = lua_toShuttleA (L, 1);
 	int mode = lua_tointeger (L, 2);

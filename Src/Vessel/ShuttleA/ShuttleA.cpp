@@ -14,6 +14,12 @@
 
 #include "ShuttleA.h"
 #include "ScnEditorAPI.h"
+#ifndef _WIN32
+// The scenario-editor interface below is a Win32 construct; the port shim
+// provides the message/dialog types it references.
+#include <windows.h>
+#include <winuser.h>
+#endif
 #include "DlgCtrl.h"
 #include "attref.h"
 #include "mfdbutton.h"

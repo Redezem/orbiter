@@ -68,7 +68,9 @@ int main (int argc, char **argv)
 
 	double alt = 0, gs = 0;
 	bool have_alt = oapiGetFocusAltitude(&alt);
-	oapiGetGroundspeed((OBJHANDLE)v, &gs);
+	// VESSEL is the public module interface, not the internal object handle.
+	// Casting it to OBJHANDLE makes the API interpret unrelated memory as Vessel.
+	oapiGetGroundspeed(v->GetHandle(), &gs);
 
 	// Surface quantities are undefined in orbit; fall back to orbital state.
 	double peri = 0, apo = 0;
@@ -87,7 +89,10 @@ int main (int argc, char **argv)
 	bool saved = g_pOrbiter->SaveScenario("SmokeSaved", "smoke harness", 2);
 	printf("[smoke] SaveScenario %s\n", saved ? "OK" : "FAIL");
 
-	// Clean close
+	// Exercise real teardown instead of allowing configured fast shutdown
+	// to exit(0) before cleanup and the final verification marker.
+	g_pOrbiter->Cfg()->CfgDebugPrm.ShutdownMode = 0;
+	g_pOrbiter->SetFastExit(false);
 	g_pOrbiter->CloseSession();
 	printf("[smoke] CloseSession OK\n");
 

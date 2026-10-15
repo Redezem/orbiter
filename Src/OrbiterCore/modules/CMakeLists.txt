@@ -129,3 +129,48 @@ set_target_properties(DeltaGlider PROPERTIES
 	LIBRARY_OUTPUT_DIRECTORY ${ORB_MODULE_DIR}
 	PREFIX ""
 )
+
+# ShuttleA — legacy shuttle vessel (meshc-generated meshres)
+set(SA_SRC_DIR ${CMAKE_SOURCE_DIR}/Src/Vessel/ShuttleA)
+set(SA_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/shuttlea_gen)
+file(MAKE_DIRECTORY ${SA_GEN_DIR})
+add_custom_command(OUTPUT ${SA_GEN_DIR}/meshres.h
+	COMMAND $<TARGET_FILE:meshc> /I ${SA_SRC_DIR}/Meshes/ShuttleA.msh /P - /O ${SA_GEN_DIR}/meshres.h
+	DEPENDS ${SA_SRC_DIR}/Meshes/ShuttleA.msh meshc
+)
+add_custom_target(ShuttleA_Prerequisites DEPENDS ${SA_GEN_DIR}/meshres.h)
+
+file(GLOB SA_SRCS ${SA_SRC_DIR}/*.cpp)
+add_library(ShuttleA SHARED
+	${SA_SRCS}
+	${CMAKE_SOURCE_DIR}/Src/Vessel/Common/Instrument.cpp
+)
+target_include_directories(ShuttleA PRIVATE
+	${CMAKE_SOURCE_DIR}/Orbitersdk/include
+	${CMAKE_SOURCE_DIR}/Src/OrbiterCore/shim
+	${CMAKE_SOURCE_DIR}/Src/Vessel/Common
+	${CMAKE_SOURCE_DIR}/Src/Plugin/ScnEditor
+	${SA_SRC_DIR}
+	${SA_GEN_DIR}
+)
+target_link_libraries(ShuttleA PRIVATE orb-lua)
+add_dependencies(ShuttleA ShuttleA_Prerequisites)
+target_link_options(ShuttleA PRIVATE -undefined dynamic_lookup)
+set_target_properties(ShuttleA PROPERTIES
+	LIBRARY_OUTPUT_DIRECTORY ${ORB_MODULE_DIR}
+	PREFIX ""
+)
+
+# ShuttlePB — minimal payload-bay shuttle variant, no generated headers
+add_library(ShuttlePB SHARED
+	${CMAKE_SOURCE_DIR}/Src/Vessel/ShuttlePB/ShuttlePB.cpp
+)
+target_include_directories(ShuttlePB PRIVATE
+	${CMAKE_SOURCE_DIR}/Orbitersdk/include
+	${CMAKE_SOURCE_DIR}/Src/OrbiterCore/shim
+)
+target_link_options(ShuttlePB PRIVATE -undefined dynamic_lookup)
+set_target_properties(ShuttlePB PROPERTIES
+	LIBRARY_OUTPUT_DIRECTORY ${ORB_MODULE_DIR}
+	PREFIX ""
+)
