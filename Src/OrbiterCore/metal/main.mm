@@ -137,6 +137,7 @@ public:
     }
     ~CoreMetalClient() override { release(); }
     bool clbkInitialise() override {
+        SDL_SetHint(SDL_HINT_MAC_BACKGROUND_APP, "1");
         if (!SDL_Init(SDL_INIT_VIDEO)) return fail(SDL_GetError());
         sdl_ = true;
         window_ = SDL_CreateWindow("Orbiter core Metal probe", width, height,
@@ -152,6 +153,8 @@ public:
         layer_.pixelFormat = MTLPixelFormatBGRA8Unorm;
         layer_.drawableSize = CGSizeMake(width, height);
         layer_.allowsNextDrawableTimeout = YES;
+        // Mirror the actual drawable scene for GPU readback; never show the window.
+        layer_.framebufferOnly = NO;
         auto desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
                                                                      width:width height:height mipmapped:NO];
         desc.usage = MTLTextureUsageRenderTarget;
@@ -162,6 +165,7 @@ public:
             mesh_oracle_ = [device_ newTextureWithDescriptor:desc];
             if (!mesh_oracle_) return fail("mesh oracle texture unavailable");
         }
+        printf("[core-metal] scene_source=%s pre_ui_oracle=%s\n",present_ ? "drawable" : "offscreen", engine_camera_ ? (present_ ? "drawable" : "offscreen") : "none");
         printf("[core-metal] device=%s mode=%s hidden=1\n", device_.name.UTF8String,
                present_ ? "hidden-present" : "offscreen");
         return true;
@@ -203,13 +207,13 @@ public:
             [encoder_ endEncoding];
             encoder_ = nil;
             auto copy = [buffer_ blitCommandEncoder];
-            [copy copyFromTexture:target_ sourceSlice:0 sourceLevel:0
+            [copy copyFromTexture:(present_ ? drawable_.texture : target_) sourceSlice:0 sourceLevel:0
                   sourceOrigin:MTLOriginMake(0,0,0) sourceSize:MTLSizeMake(width,height,1)
                   toTexture:mesh_oracle_ destinationSlice:0 destinationLevel:0
                   destinationOrigin:MTLOriginMake(0,0,0)];
             [copy endEncoding];
             auto ui = [MTLRenderPassDescriptor renderPassDescriptor];
-            ui.colorAttachments[0].texture = target_;
+            ui.colorAttachments[0].texture = present_ ? drawable_.texture : target_;
             ui.colorAttachments[0].loadAction = MTLLoadActionLoad;
             ui.colorAttachments[0].storeAction = MTLStoreActionStore;
             encoder_ = [buffer_ renderCommandEncoderWithDescriptor:ui];
@@ -221,8 +225,8 @@ public:
     uint64_t clbkImGuiSurfaceTexture(SURFHANDLE) override { return 0; }
     bool verified(unsigned n) const {
         return updates == n && renders == n && newframes == n && drawdata == n &&
-               displays == n && completed == n && errors == 0 && readbacks == (present_ ? 0 : n) &&
-               presented == (present_ ? n : 0) && creates == 1 && closes == 1 && destroys == 1 &&
+               displays == n && completed == n && errors == 0 && readbacks == n &&
+               scheduled == (present_ ? n : 0) && acquired == scheduled && hidden_checks == n && creates == 1 && closes == 1 && destroys == 1 &&
                imgui_init == 1 && imgui_shutdown == 1 &&
                (snapshot_.empty() || (uploaded_meshes > 0 && uploaded_triangles > 0 &&
                  mesh_draw_calls == n && drawn_triangles == uploaded_triangles*n &&
@@ -230,6 +234,8 @@ public:
                (!engine_camera_ || camera_frames_ == n);
     }
     void report() const {
+        printf("[core-metal] drawable_acquired=%u present_scheduled=%u actual_presented=%u hidden_checks=%u\n",acquired,scheduled,presented,hidden_checks);
+        if (present_ && presented != scheduled) printf("[core-metal] hidden-window limitation: positive presentedTime observed for %u/%u submissions within 100ms/frame; scanout NOT established for remaining frames\n",presented,scheduled);
         if(engine_camera_) printf("[core-metal] camera_frames=%u\n",camera_frames_);
         printf("[core-metal] update=%u newframe=%u render=%u drawdata=%u display=%u completed=%u presented=%u readback=%u errors=%u\n",
                updates,newframes,renders,drawdata,displays,completed,presented,readbacks,errors);
@@ -249,9 +255,13 @@ protected:
     void clbkRenderScene() override {
         ++renders;
         check(newframes == renders && displays + 1 == renders, "newframe/render order");
+        check((SDL_GetWindowFlags(window_) & SDL_WINDOW_HIDDEN) &&
+              !(SDL_GetWindowFlags(window_) & SDL_WINDOW_INPUT_FOCUS), "probe window visible/focused");
+        ++hidden_checks;
         if(engine_camera_) updateEngineCamera();
         drawable_ = present_ ? [layer_ nextDrawable] : nil;
-        if (present_ && !drawable_) throw std::runtime_error("hidden layer returned no drawable");
+        if (present_ && !drawable_) throw std::runtime_error("hidden layer returned no drawable; presentation unavailable (window will NOT be shown)");
+        if (drawable_) ++acquired;
         auto pass = [MTLRenderPassDescriptor renderPassDescriptor];
         pass.colorAttachments[0].texture = present_ ? drawable_.texture : target_;
         pass.colorAttachments[0].loadAction = MTLLoadActionClear;
@@ -289,7 +299,18 @@ protected:
         check(drawdata == displays, "drawdata/display order");
         [encoder_ endEncoding];
         encoder_ = nil;
-        if (present_) [buffer_ presentDrawable:drawable_];
+        if (present_) {
+            check(drawable_.texture.width == width && drawable_.texture.height == height, "drawable size mismatch");
+            auto copy = [buffer_ blitCommandEncoder];
+            check(copy != nil, "drawable copy encoder unavailable");
+            [copy copyFromTexture:drawable_.texture sourceSlice:0 sourceLevel:0
+                  sourceOrigin:MTLOriginMake(0,0,0) sourceSize:MTLSizeMake(width,height,1)
+                  toTexture:target_ destinationSlice:0 destinationLevel:0
+                  destinationOrigin:MTLOriginMake(0,0,0)];
+            [copy endEncoding];
+            [buffer_ presentDrawable:drawable_];
+            ++scheduled; // Submission request, NOT proof of display scanout.
+        }
         [buffer_ commit];
         [buffer_ waitUntilCompleted];
         if (buffer_.status != MTLCommandBufferStatusCompleted || buffer_.error) {
@@ -298,8 +319,16 @@ protected:
             return false;
         }
         ++completed;
-        if (present_) ++presented;
-        else {
+        if (present_) {
+            // GPU completion does not imply presentation. Hidden windows may never scan out.
+            // Bounded wait only; never activate/show a window to force WindowServer progress.
+            for (unsigned poll=0; poll<10 && drawable_.presentedTime<=0; ++poll) SDL_Delay(10);
+            double time=drawable_.presentedTime;
+            if (time>0) ++presented;
+            printf("[core-metal] drawable frame=%u id=%llu presented_time=%.9f gpu_completed=1\n",
+                   completed,(unsigned long long)drawable_.drawableID,time);
+        }
+        {
             // Verify actual GPU output, not just callback dispatch. Corner avoids ImGui content.
             unsigned char bgra[4] = {};
             [target_ getBytes:bgra bytesPerRow:4 fromRegion:MTLRegionMake2D(width-1,height-1,1,1) mipmapLevel:0];
@@ -441,23 +470,26 @@ private:
     id<CAMetalDrawable> drawable_ = nil;
     id<MTLCommandBuffer> buffer_ = nil;
     id<MTLRenderCommandEncoder> encoder_ = nil;
+    unsigned acquired=0,scheduled=0,hidden_checks=0;
     unsigned updates=0,newframes=0,renders=0,drawdata=0,displays=0,completed=0,presented=0,readbacks=0,errors=0;
     unsigned creates=0,closes=0,destroys=0,imgui_init=0,imgui_shutdown=0;
 };
 
 int main(int argc, char **argv) {
-    if (argc < 3 || argc > 5) {
-        fprintf(stderr,"Usage (from content root): orbiter-core-metal <scenario> <frames 1..10000> [--hidden-present | --mesh snapshot.ppm | --engine-camera snapshot.ppm | --engine-camera-test snapshot.ppm | --diagnostic-frozen-camera-test snapshot.ppm]\n");
+    if (argc < 3 || argc > 6) {
+        fprintf(stderr,"Usage (from content root): orbiter-core-metal <scenario> <frames 1..10000> [--mesh snapshot.ppm | --engine-camera snapshot.ppm | --engine-camera-test snapshot.ppm | --diagnostic-frozen-camera-test snapshot.ppm] [--hidden-present]\n");
         return 2;
     }
     char *end = nullptr;
     long frames = strtol(argv[2], &end, 10);
+    bool present = argc>=4 && std::string(argv[argc-1])=="--hidden-present";
+    int modeArgc=argc-(present ? 1 : 0);
     if (!end || *end || frames < 1 || frames > 10000 ||
-        (argc == 4 && std::string(argv[3]) != "--hidden-present") ||
-        (argc == 5 && ((std::string(argv[3]) != "--mesh" && std::string(argv[3]) != "--engine-camera" && std::string(argv[3]) != "--engine-camera-test" && std::string(argv[3]) != "--diagnostic-frozen-camera-test") || !argv[4][0]))) return 2;
-    bool engineCamera=argc==5 && std::string(argv[3])!="--mesh";
-    bool freezeClip=argc==5 && std::string(argv[3])=="--diagnostic-frozen-camera-test";
-    bool cameraTest=argc==5 && (std::string(argv[3])=="--engine-camera-test" || freezeClip);
+        (modeArgc != 3 && modeArgc != 5) ||
+        (modeArgc == 5 && ((std::string(argv[3]) != "--mesh" && std::string(argv[3]) != "--engine-camera" && std::string(argv[3]) != "--engine-camera-test" && std::string(argv[3]) != "--diagnostic-frozen-camera-test") || !argv[4][0]))) return 2;
+    bool engineCamera=modeArgc==5 && std::string(argv[3])!="--mesh";
+    bool freezeClip=modeArgc==5 && std::string(argv[3])=="--diagnostic-frozen-camera-test";
+    bool cameraTest=modeArgc==5 && (std::string(argv[3])=="--engine-camera-test" || freezeClip);
     if(cameraTest && frames<2) return 2;
     setvbuf(stdout, nullptr, _IONBF, 0);
     @autoreleasepool {
@@ -475,7 +507,7 @@ int main(int argc, char **argv) {
                 throw std::runtime_error("core native Create returned no CDIFramework7");
             g_pOrbiter->Cfg()->CfgDebugPrm.ShutdownMode = 0;
             g_pOrbiter->SetFastExit(false);
-            client = new CoreMetalClient(argc == 4, argc == 5 ? argv[4] : "", engineCamera, freezeClip);
+            client = new CoreMetalClient(present, modeArgc == 5 ? argv[4] : "", engineCamera, freezeClip);
             if(freezeClip) printf("[core-metal] DIAGNOSTIC NEGATIVE CONTROL: GPU clip frozen at frame 1; API camera still changes\n");
             attached = oapiRegisterGraphicsClient(client);
             if (!attached || !client->clbkInitialise()) throw std::runtime_error("graphics registration/init failed");
@@ -491,12 +523,12 @@ int main(int argc, char **argv) {
             client->detachFocusMesh();
             g_pOrbiter->CloseSession();
             launched = false;
-            client->report();
             result = client->verified(static_cast<unsigned>(frames)) ? 0 : 1;
         } catch (const std::exception &e) {
             fprintf(stderr,"[core-metal] FAIL: %s\n", e.what());
         }
         if (launched) { if(client) client->detachFocusMesh(); g_pOrbiter->CloseSession(); }
+        if (client) client->report();
         if (attached && !oapiUnregisterGraphicsClient(client)) result = 1;
         delete client;
         delete g_pOrbiter;

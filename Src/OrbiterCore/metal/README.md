@@ -33,7 +33,7 @@ python3 Src/OrbiterCore/metal/mesh_regression.py \
 ```
 
 The explicit executable option is `--mesh /absolute/path/snapshot.ppm` after the
-scenario and frame count; it cannot be combined with `--hidden-present`.
+scenario and frame count; append `--hidden-present` to use the hidden drawable path.
 This uses the actual focus `VESSEL` and `GetMeshCount`, `GetMeshTemplate`,
 `GetMeshOffset`, `GetMeshVisibilityMode`, `oapiMeshGroupCount`, and `oapiMeshGroup`.
 No separate mesh-file parser or replacement simulation is used. External-visible
@@ -115,6 +115,43 @@ python3 Src/OrbiterCore/metal/camera_regression.py \
   out/build/macos-core-spike/Src/OrbiterCore/metal/orbiter-core-metal \
   out/stage/content /Users/redezem/.hermes/cache/scratch/orbiter-engine-camera
 ```
+
+## Hidden Metal drawable submission (not visible-presentation QA)
+
+```sh
+python3 Src/OrbiterCore/metal/camera_regression.py \
+  out/build/macos-core-spike/Src/OrbiterCore/metal/orbiter-core-metal \
+  out/stage/content /Users/redezem/.hermes/cache/scratch/orbiter-metal-presentation \
+  --hidden-present
+```
+
+Append `--hidden-present` **after** the existing executable mode/snapshot options.
+Clear-only `scenario 12 --hidden-present` remains supported. This opts into a real
+SDL hidden window's `CAMetalLayer.nextDrawable`, renders the same engine-camera
+mesh directly into its texture, GPU-copies that drawable to the mesh-only oracle
+**before** actual ImGui compositing, copies the composited drawable into the
+CPU-readable target, then calls `presentDrawable`, commits and waits for GPU
+completion. `framebufferOnly=NO` permits these real drawable readbacks. The usual
+independent projection, mesh palette and changed-view oracles remain active,
+including the frozen-GPU negative control. No alternate synthetic image is used.
+
+Every frame checks SDL hidden/no-input-focus flags; SDL's macOS background-app
+hint is set before initialization. No show/raise/activate/input API is called.
+A missing drawable fails explicitly and normal cleanup is attempted; the probe
+never shows a window as a fallback.
+
+Counts deliberately distinguish acquired drawables, **scheduled** presentation
+requests, GPU completion and **observed** positive `drawable.presentedTime`.
+GPU completion alone never increments `presented`. Observation is bounded to
+100 ms per frame, and per-frame drawable IDs/timestamps are logged. On the tested
+Apple M1 macOS host, all 12 drawables per run were acquired, rendered, mirrored,
+scheduled and completed without GPU errors, but all `presentedTime` values stayed
+zero. Thus hidden drawable rendering/submission works; actual display/scanout is
+**not established**. A PASS is for that bounded submission/readback lifecycle,
+not visible presentation. The executable prints this limitation explicitly.
+The runner repeats both camera modes three times and reports actual observed
+presentation counts instead of requiring or fabricating them. Offscreen clear,
+mesh and camera regression oracles/signatures are unchanged.
 
 ## Review dispositions
 

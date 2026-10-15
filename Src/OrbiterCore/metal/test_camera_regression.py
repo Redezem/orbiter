@@ -5,7 +5,34 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from camera_regression import image
+from camera_regression import image, verify_presentation
+
+
+class PresentationParsing(unittest.TestCase):
+    # Deliberate parser fixtures only, not execution/presentation evidence.
+    def log(self, time='0.000000000', actual=0):
+        return ('scene_source=drawable pre_ui_oracle=drawable\n'
+                f'drawable frame=1 id=7 presented_time={time} gpu_completed=1\n'
+                f'drawable_acquired=1 present_scheduled=1 actual_presented={actual} hidden_checks=1\n'
+                f'completed=1 presented={actual} readback=1 errors=0\n')
+
+    def test_scheduling_is_not_actual_presentation(self):
+        self.assertEqual(verify_presentation(self.log(), frames=1), 0)
+
+    def test_positive_time_is_actual_presentation(self):
+        self.assertEqual(verify_presentation(self.log('123.456', 1), frames=1), 1)
+
+    def test_rejects_fake_presented_counter(self):
+        with self.assertRaisesRegex(RuntimeError, 'inconsistent'):
+            verify_presentation(self.log(actual=1), frames=1)
+
+    def test_rejects_missing_drawable(self):
+        with self.assertRaisesRegex(RuntimeError, 'missing completed'):
+            verify_presentation(self.log().replace('drawable frame=', 'missing frame='), frames=1)
+
+    def test_rejects_wrong_readback_source(self):
+        with self.assertRaisesRegex(RuntimeError, 'mirror actual drawable'):
+            verify_presentation(self.log().replace('pre_ui_oracle=drawable', 'pre_ui_oracle=offscreen'), frames=1)
 
 
 class StagingSafety(unittest.TestCase):
