@@ -27,13 +27,15 @@
 #include <limits>
 #include <array>
 #include "material_semantics.h"
+#include "metal_textures.h"
+#include "texture_evidence.h"
 
 extern Orbiter *g_pOrbiter;
 
 class CoreMetalClient final : public oapi::GraphicsClient {
 public:
-    explicit CoreMetalClient(bool present, std::string snapshot = {}, bool engineCamera = false, bool freezeClip = false, bool materials = false)
-        : GraphicsClient(nullptr), present_(present), engine_camera_(engineCamera), freeze_clip_(freezeClip), materials_(materials), snapshot_(std::move(snapshot)) {}
+    explicit CoreMetalClient(bool present, std::string snapshot = {}, bool engineCamera = false, bool freezeClip = false, bool materials = false, bool textures = false, bool ignoreSampling = false)
+        : GraphicsClient(nullptr), present_(present), engine_camera_(engineCamera), freeze_clip_(freezeClip), materials_(materials), textures_(textures), ignore_sampling_(ignoreSampling), snapshot_(std::move(snapshot)) {}
     void setTestCamera(unsigned view, bool materialViews=false) {
         check(engine_camera_ && (view == 1 || view == 2), "invalid controlled camera");
         CameraMode_Track mode;
@@ -41,7 +43,7 @@ public:
         mode.SetTrackMode(CameraMode_Track::TM_RELATIVE);
         // Material views look down onto actual canopy materials rather than the
         // original camera regression's all-white underside. Original views unchanged.
-        mode.SetPosition(4.0, materialViews ? (view == 1 ? 2.74 : 2.04) : (view == 1 ? 0.4 : 1.1), materialViews ? (view == 1 ? -0.6 : -0.8) : (view == 1 ? 0.3 : 0.5));
+        mode.SetPosition(textures_ ? 2.8 : 4.0, materialViews ? (view == 1 ? 2.74 : 2.04) : (view == 1 ? 0.4 : 1.1), materialViews ? (view == 1 ? -0.6 : -0.8) : (view == 1 ? 0.3 : 0.5));
         mode.SetFOV(40.0); // full vertical FOV in degrees; engine API aperture is half-FOV radians.
         check(oapiSetCameraMode(mode), "engine camera mode rejected");
         controlled_view_=view;
@@ -58,7 +60,8 @@ public:
         std::vector<SourceVertex> source;
         std::vector<uint32_t> indices;
         std::vector<std::array<float,4>> colors;
-        if(materials_) printf("[core-metal] materials_mode=opaque-diffuse-only textures=unsupported; alpha stored but not blended; no specular/emissive/scene lighting\n");
+        std::vector<std::array<float,2>> uvs;
+        if(materials_) printf("[core-metal] materials_mode=opaque-diffuse-only textures=%s; alpha stored but not blended; no specular/emissive/scene lighting\n",textures_ ? "mip0-uv-diffuse" : "unsupported");
         printf("[core-metal] camera_mode=%s\n",engine_camera_ ? "engine world perspective" : "diagnostic vessel-local orthographic auto-fit fixed-oblique; NOT engine camera");
         const unsigned mesh_count = vessel->GetMeshCount();
         for (unsigned m=0; m<mesh_count; ++m) {
@@ -71,14 +74,32 @@ public:
             unsigned before = indices.size();
             if(materials_) {
                 unsigned available=0;
-                for(DWORD t=1;t<=oapiMeshTextureCount(mesh);++t) if(oapiGetTextureHandle(mesh,t)) ++available;
+                for(DWORD t=1;t<=oapiMeshTextureCount(mesh);++t) {
+                    auto handle=oapiGetTextureHandle(mesh,t);
+                    if(handle) ++available;
+                    if(textures_) {
+                        const auto *entry=texture_store_->lookup(handle);
+                        check(entry!=nullptr,"unavailable template texture slot");
+                        printf("[core-metal] texture_slot slot=%u handle=%p path=%s\n",t,handle,entry->path.c_str());
+                    }
+                }
                 printf("[core-metal] material_mesh=%u engine_materials=%u engine_textures=%u nonnull_texture_handles=%u\n",m,oapiMeshMaterialCount(mesh),oapiMeshTextureCount(mesh),available);
             }
             unsigned previousMaterial=core_metal::defaultMaterial;
+            unsigned previousTexture=0;
             for (DWORD g=0; g<oapiMeshGroupCount(mesh); ++g) {
                 MESHGROUP *group = oapiMeshGroup(mesh,g);
                 check(group != nullptr, "null engine mesh group");
                 std::array<float,4> diffuse={1,1,1,1};
+                void *textureHandle=nullptr;
+                if(textures_) {
+                    unsigned index=core_metal::resolveTexture(group->TexIdx,previousTexture,oapiMeshTextureCount(mesh));
+                    if(index) {
+                        textureHandle=oapiGetTextureHandle(mesh,index);
+                        check(textureHandle && texture_store_->lookup(textureHandle),"engine group texture unavailable or foreign handle");
+                    }
+                    printf("[core-metal] texture_group mesh=%u group=%u raw=%u resolved=%u handle=%p\n",m,g,group->TexIdx,index,textureHandle);
+                }
                 if(materials_) {
                     unsigned resolved=core_metal::resolveMaterial(group->MtrlIdx,previousMaterial,oapiMeshMaterialCount(mesh));
                     if(resolved!=core_metal::defaultMaterial) {
@@ -96,6 +117,10 @@ public:
                 if(materials_) material_palette_.push_back(diffuse);
                 check(group->Vtx && group->Idx && group->nVtx && group->nIdx % 3 == 0, "invalid triangle group");
                 uint32_t base = static_cast<uint32_t>(source.size());
+                if(textures_) {
+                    if(textureHandle) check(texture_store_->pin(textureHandle),"texture mesh pin failed");
+                    texture_ranges_.push_back({indices.size(),group->nIdx,textureHandle});
+                }
                 for (DWORD i=0; i<group->nVtx; ++i) {
                     const auto &v=group->Vtx[i];
                     double x=v.x+offset.x,y=v.y+offset.y,z=v.z+offset.z;
@@ -106,6 +131,10 @@ public:
                                       engine_camera_ ? z : 0.48*x+0.6*y+0.64*z,
                                       0.35f+0.6f*std::abs(0.48f*v.nx+0.6f*v.ny+0.64f*v.nz)});
                     if(materials_) colors.push_back(diffuse);
+                    if(textures_) {
+                        check(std::isfinite(v.tu)&&std::isfinite(v.tv),"nonfinite engine UV");
+                        uvs.push_back({v.tu,v.tv});
+                    }
                 }
                 for (DWORD i=0;i<group->nIdx;++i) {
                     check(group->Idx[i] < group->nVtx, "mesh index out of bounds");
@@ -133,6 +162,7 @@ public:
             float(engine_camera_ ? v.y : (v.y-(lo[1]+hi[1])*0.5)*scale),
             float(engine_camera_ ? v.z : 0.1+0.8*(hi[2]-v.z)/depth), std::clamp(v.shade,0.35f,0.95f)});
         sample_local_ = _V(vertices[0].x, vertices[0].y, vertices[0].z);
+        if(textures_) core_metal::writeTextureGeometry(snapshot_+".geometry.json",vertices,uvs,colors,indices,texture_ranges_,*texture_store_);
         mesh_vertices_=[device_ newBufferWithBytes:vertices.data() length:vertices.size()*sizeof(GPUVertex) options:MTLResourceStorageModeShared];
         mesh_indices_=[device_ newBufferWithBytes:indices.data() length:indices.size()*sizeof(uint32_t) options:MTLResourceStorageModeShared];
         uploaded_vertices=vertices.size(); uploaded_triangles=indices.size()/3;
@@ -143,8 +173,13 @@ public:
             check(material_colors_!=nil,"material GPU upload failed");
         }
         NSError *error=nil;
+        if(textures_) {
+            texture_uvs_=[device_ newBufferWithBytes:uvs.data() length:uvs.size()*sizeof(uvs[0]) options:MTLResourceStorageModeShared];
+            check(texture_uvs_!=nil,"UV upload failed");
+        }
         NSString *shader=@"#include <metal_stdlib>\nusing namespace metal;\nstruct V { float4 p; }; struct O { float4 p [[position]]; float shade; };\nvertex O mesh_vertex(uint i [[vertex_id]], const device V* v [[buffer(0)]], constant float4x4& clip [[buffer(1)]]) { O o; o.p=clip*float4(v[i].p.xyz,1); o.shade=v[i].p.w; return o; }\nfragment float4 mesh_fragment(O i [[stage_in]]) { return float4(i.shade,i.shade,i.shade,1); }";
         if(materials_) shader=@"#include <metal_stdlib>\nusing namespace metal;\nstruct V { float4 p; }; struct O { float4 p [[position]]; float shade; float4 diffuse; };\nvertex O mesh_vertex(uint i [[vertex_id]], const device V* v [[buffer(0)]], constant float4x4& clip [[buffer(1)]], const device float4* colors [[buffer(2)]]) { O o; o.p=clip*float4(v[i].p.xyz,1); o.shade=v[i].p.w; o.diffuse=colors[i]; return o; }\nfragment float4 mesh_fragment(O i [[stage_in]]) { return float4(i.diffuse.rgb*i.shade,1); }";
+        if(textures_) shader=@"#include <metal_stdlib>\nusing namespace metal;\nstruct V { float4 p; }; struct O { float4 p [[position]]; float shade; float4 diffuse; float2 uv; };\nvertex O mesh_vertex(uint i [[vertex_id]], const device V* v [[buffer(0)]], constant float4x4& clip [[buffer(1)]], const device float4* colors [[buffer(2)]], const device float2* uv [[buffer(3)]]) { O o; o.p=clip*float4(v[i].p.xyz,1); o.shade=v[i].p.w; o.diffuse=colors[i]; o.uv=uv[i]; return o; }\nfragment float4 mesh_fragment(O i [[stage_in]], texture2d<float> tex [[texture(0)]], constant uint& enabled [[buffer(0)]]) { constexpr sampler s(coord::normalized,address::repeat,filter::nearest,mip_filter::none); float3 sample=float3(1); if(enabled) sample=tex.sample(s,i.uv,level(0)).rgb; return float4(sample*i.diffuse.rgb*i.shade,1); }";
         id<MTLLibrary> library=[device_ newLibraryWithSource:shader options:nil error:&error];
         if(!library) throw std::runtime_error(error.description.UTF8String);
         auto pipeline=[MTLRenderPipelineDescriptor new];
@@ -162,6 +197,11 @@ public:
         check(mesh_depth_state_ && mesh_depth_, "mesh depth allocation failed");
     }
     void detachFocusMesh() {
+        if(texture_store_) {
+            for(auto &range:texture_ranges_) if(range.handle) texture_store_->unpin(range.handle);
+            texture_ranges_.clear(); texture_uvs_=nil;
+            printf("[core-metal] texture_mesh_pins_released=1 before_engine_teardown=1\n");
+        }
         if(visual_object_) { UnregisterVisObject(visual_object_); visual_object_=nullptr; ++visual_unregister; }
         // All command buffers are synchronously completed; no engine material pointer
         // was retained. Drop the material GPU copy before world/template destruction.
@@ -187,6 +227,11 @@ public:
         device_ = MTLCreateSystemDefaultDevice();
         queue_ = [device_ newCommandQueue];
         if (!device_ || !queue_) return fail("Metal device/queue unavailable");
+        if(textures_) {
+            auto &dirs=g_pOrbiter->Cfg()->CfgDirPrm;
+            texture_store_=core_metal::makeMetalTextures(device_,dirs.HightexDir,dirs.TextureDir);
+            printf("[core-metal] texture_roots high=%s standard=%s; RGBA8Unorm shared mip0 nearest-repeat opaque\n",dirs.HightexDir,dirs.TextureDir);
+        }
         layer_ = (__bridge CAMetalLayer *)SDL_Metal_GetLayer(view_);
         layer_.device = device_;
         layer_.pixelFormat = MTLPixelFormatBGRA8Unorm;
@@ -263,11 +308,20 @@ public:
     }
     uint64_t clbkImGuiSurfaceTexture(SURFHANDLE) override { return 0; }
     SURFHANDLE clbkLoadTexture(const char *fname, DWORD flags=0) override {
+        if(textures_) {
+            auto handle=texture_store_ ? texture_store_->load(fname,flags) : nullptr;
+            auto entry=texture_store_ ? texture_store_->lookup(handle) : nullptr;
+            printf("[core-metal] texture_load name=%s flags=%u handle=%p path=%s width=%u height=%u\n",fname ? fname : "(null)",flags,handle,entry ? entry->path.c_str() : "unsupported",entry ? entry->width : 0,entry ? entry->height : 0);
+            return handle;
+        }
         if(materials_) {
             ++unsupported_texture_loads_;
             printf("[core-metal] unsupported_texture_request=%s flags=%u returned=null\n",fname,flags);
         }
         return nullptr; // No fake handles or white-texture stand-ins.
+    }
+    void clbkReleaseTexture(SURFHANDLE handle) override {
+        if(texture_store_) texture_store_->release(handle);
     }
     bool verified(unsigned n) const {
         return updates == n && renders == n && newframes == n && drawdata == n &&
@@ -283,7 +337,7 @@ public:
         printf("[core-metal] drawable_acquired=%u present_scheduled=%u actual_presented=%u hidden_checks=%u\n",acquired,scheduled,presented,hidden_checks);
         if (present_ && presented != scheduled) printf("[core-metal] hidden-window limitation: positive presentedTime observed for %u/%u submissions within 100ms/frame; scanout NOT established for remaining frames\n",presented,scheduled);
         if(engine_camera_) printf("[core-metal] camera_frames=%u\n",camera_frames_);
-        if(materials_) printf("[core-metal] texture_load_callbacks=%u texture_successes=0 textures_supported=0\n",unsupported_texture_loads_);
+        if(materials_ && !textures_) printf("[core-metal] texture_load_callbacks=%u texture_successes=0 textures_supported=0\n",unsupported_texture_loads_);
         printf("[core-metal] update=%u newframe=%u render=%u drawdata=%u display=%u completed=%u presented=%u readback=%u errors=%u\n",
                updates,newframes,renders,drawdata,displays,completed,presented,readbacks,errors);
         printf("[core-metal] create=%u close=%u destroy=%u imgui_init=%u imgui_shutdown=%u\n",
@@ -305,6 +359,8 @@ protected:
         check((SDL_GetWindowFlags(window_) & SDL_WINDOW_HIDDEN) &&
               !(SDL_GetWindowFlags(window_) & SDL_WINDOW_INPUT_FOCUS), "probe window visible/focused");
         ++hidden_checks;
+        if(textures_) for(const auto &range:texture_ranges_)
+            check(!range.handle || texture_store_->lookup(range.handle),"stale/foreign texture draw handle");
         if(engine_camera_) updateEngineCamera();
         drawable_ = present_ ? [layer_ nextDrawable] : nil;
         if (present_ && !drawable_) throw std::runtime_error("hidden layer returned no drawable; presentation unavailable (window will NOT be shown)");
@@ -328,6 +384,7 @@ protected:
             [encoder_ setDepthStencilState:mesh_depth_state_];
             [encoder_ setCullMode:MTLCullModeNone];
             [encoder_ setVertexBuffer:mesh_vertices_ offset:0 atIndex:0];
+            if(textures_) [encoder_ setVertexBuffer:texture_uvs_ offset:0 atIndex:3];
             if(materials_) [encoder_ setVertexBuffer:material_colors_ offset:0 atIndex:2];
             if (!freeze_clip_ || renders==1) std::copy(clip_,clip_+16,gpu_clip_);
             [encoder_ setVertexBytes:gpu_clip_ length:sizeof(gpu_clip_) atIndex:1];
@@ -336,7 +393,17 @@ protected:
                 for(int i=0;i<16;++i) printf("%s%.17g",i ? "," : "",double(gpu_clip_[i]));
                 printf("]\n");
             }
-            [encoder_ drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:uploaded_triangles*3
+            if(textures_) {
+                for(const auto &range:texture_ranges_) {
+                    const auto *entry=texture_store_->lookup(range.handle);
+                    unsigned enabled=entry && !ignore_sampling_;
+                    [encoder_ setFragmentTexture:entry ? entry->payload : nil atIndex:0];
+                    [encoder_ setFragmentBytes:&enabled length:sizeof(enabled) atIndex:0];
+                    [encoder_ drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:range.count
+                        indexType:MTLIndexTypeUInt32 indexBuffer:mesh_indices_ indexBufferOffset:range.first*sizeof(uint32_t)];
+                    ++texture_group_draws_;
+                }
+            } else [encoder_ drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:uploaded_triangles*3
                 indexType:MTLIndexTypeUInt32 indexBuffer:mesh_indices_ indexBufferOffset:0];
             ++mesh_draw_calls; drawn_triangles+=uploaded_triangles;
         }
@@ -390,17 +457,22 @@ protected:
                 for (size_t i=0;i<pixels.size();i+=4) {
                     const auto *p=&pixels[i];
                     if(p[0]==128&&p[1]==64&&p[2]==32&&p[3]==255) { ++background; continue; }
-                    if(materials_) {
+                    if(textures_) { if(p[3]==255) { ++geometry; if(p[0]!=p[1]||p[1]!=p[2]) ++chromatic; } else ++invalid; }
+                    else if(materials_) {
                         bool allowed=std::any_of(material_palette_.begin(),material_palette_.end(),[p](const auto &color){ return core_metal::diffusePixel(p,color.data()); });
                         if(allowed) { ++geometry; if(p[0]!=p[1] || p[1]!=p[2]) ++chromatic; }
                         else ++invalid;
                     } else if(p[0]==p[1]&&p[1]==p[2]&&p[0]>=80&&p[3]==255) ++geometry;
                 }
-                if(materials_) {
+                if(materials_ && !textures_) {
                     check(invalid==0,"GPU non-material palette (mesh-only oracle)");
                     printf("[core-metal] material_pixels frame=%u chromatic=%u invalid=%u geometry=%u\n",completed,chromatic,invalid,geometry);
                 }
                 check(background>1000 && geometry>1000, "GPU mesh/background pixel counts");
+                if(textures_) {
+                    check(invalid==0,"nonopaque texture output");
+                    printf("[core-metal] texture_pixels frame=%u chromatic=%u geometry=%u ignore_sampling=%u\n",completed,chromatic,geometry,ignore_sampling_);
+                }
                 ++geometry_readbacks;
                 if (completed==1 || (controlled_view_==2 && !second_snapshot_)) {
                     std::string path = completed==1 ? snapshot_ : snapshot_+".view2.ppm";
@@ -490,6 +562,11 @@ private:
         printf("]}\n");
     }
     void release() {
+        if(texture_store_) {
+            printf("[core-metal] texture_store requests=%u successes=%u uploads=%u cache_hits=%u releases=%u invalid_releases=%u resident=%zu group_draws=%u\n",texture_store_->requests,texture_store_->successes,texture_store_->uploads,texture_store_->hits,texture_store_->releases,texture_store_->invalidReleases,texture_store_->resident,texture_group_draws_);
+            texture_ranges_.clear(); texture_uvs_=nil; texture_store_.reset();
+            printf("[core-metal] texture_store_destroyed=1\n");
+        }
         material_colors_=nil; material_palette_.clear();
         mesh_vertices_=nil; mesh_indices_=nil; mesh_pipeline_=nil; mesh_depth_state_=nil; mesh_depth_=nil;
         mesh_oracle_=nil;
@@ -502,6 +579,12 @@ private:
         sdl_ = false;
     }
     bool present_, engine_camera_=false, freeze_clip_=false, materials_=false, sdl_ = false, imgui_ready_ = false;
+    bool textures_=false,ignore_sampling_=false;
+    struct TextureRange { size_t first,count; void *handle; };
+    std::vector<TextureRange> texture_ranges_;
+    std::unique_ptr<core_metal::MetalTextureStore> texture_store_;
+    id<MTLBuffer> texture_uvs_=nil;
+    unsigned texture_group_draws_=0;
     id<MTLBuffer> material_colors_=nil;
     std::vector<std::array<float,4>> material_palette_;
     float gpu_clip_[16]={};
@@ -536,20 +619,21 @@ private:
 
 int main(int argc, char **argv) {
     if (argc < 3 || argc > 6) {
-        fprintf(stderr,"Usage (from content root): orbiter-core-metal <scenario> <frames 1..10000> [--mesh snapshot.ppm | --engine-camera snapshot.ppm | --engine-camera-test snapshot.ppm | --diagnostic-frozen-camera-test snapshot.ppm | --materials snapshot.ppm | --materials-test snapshot.ppm | --materials-reference-test snapshot.ppm] [--hidden-present]\n");
+        fprintf(stderr,"Usage (from content root): orbiter-core-metal <scenario> <frames 1..10000> [--mesh snapshot.ppm | --engine-camera snapshot.ppm | --engine-camera-test snapshot.ppm | --diagnostic-frozen-camera-test snapshot.ppm | --materials snapshot.ppm | --materials-test snapshot.ppm | --materials-reference-test snapshot.ppm | --textures snapshot.ppm | --textures-test snapshot.ppm | --textures-ignore-sampling-test snapshot.ppm] [--hidden-present]\n");
         return 2;
     }
     char *end = nullptr;
     long frames = strtol(argv[2], &end, 10);
     bool present = argc>=4 && std::string(argv[argc-1])=="--hidden-present";
     int modeArgc=argc-(present ? 1 : 0);
+    bool textures=modeArgc==5 && (std::string(argv[3])=="--textures" || std::string(argv[3])=="--textures-test" || std::string(argv[3])=="--textures-ignore-sampling-test");
     if (!end || *end || frames < 1 || frames > 10000 ||
         (modeArgc != 3 && modeArgc != 5) ||
-        (modeArgc == 5 && ((std::string(argv[3]) != "--mesh" && std::string(argv[3]) != "--engine-camera" && std::string(argv[3]) != "--engine-camera-test" && std::string(argv[3]) != "--diagnostic-frozen-camera-test" && std::string(argv[3]) != "--materials" && std::string(argv[3]) != "--materials-test" && std::string(argv[3]) != "--materials-reference-test") || !argv[4][0]))) return 2;
+        (modeArgc == 5 && ((!textures && std::string(argv[3]) != "--mesh" && std::string(argv[3]) != "--engine-camera" && std::string(argv[3]) != "--engine-camera-test" && std::string(argv[3]) != "--diagnostic-frozen-camera-test" && std::string(argv[3]) != "--materials" && std::string(argv[3]) != "--materials-test" && std::string(argv[3]) != "--materials-reference-test") || !argv[4][0]))) return 2;
     bool engineCamera=modeArgc==5 && std::string(argv[3])!="--mesh";
     bool freezeClip=modeArgc==5 && std::string(argv[3])=="--diagnostic-frozen-camera-test";
-    bool materials=modeArgc==5 && (std::string(argv[3])=="--materials" || std::string(argv[3])=="--materials-test");
-    bool materialViews=modeArgc==5 && (std::string(argv[3])=="--materials-test" || std::string(argv[3])=="--materials-reference-test");
+    bool materials=textures || (modeArgc==5 && (std::string(argv[3])=="--materials" || std::string(argv[3])=="--materials-test"));
+    bool materialViews=(textures && std::string(argv[3])!="--textures") || (modeArgc==5 && (std::string(argv[3])=="--materials-test" || std::string(argv[3])=="--materials-reference-test"));
     bool cameraTest=modeArgc==5 && (std::string(argv[3])=="--engine-camera-test" || materialViews || freezeClip);
     if(cameraTest && frames<2) return 2;
     setvbuf(stdout, nullptr, _IONBF, 0);
@@ -568,7 +652,7 @@ int main(int argc, char **argv) {
                 throw std::runtime_error("core native Create returned no CDIFramework7");
             g_pOrbiter->Cfg()->CfgDebugPrm.ShutdownMode = 0;
             g_pOrbiter->SetFastExit(false);
-            client = new CoreMetalClient(present, modeArgc == 5 ? argv[4] : "", engineCamera, freezeClip, materials);
+            client = new CoreMetalClient(present, modeArgc == 5 ? argv[4] : "", engineCamera, freezeClip, materials, textures, textures && std::string(argv[3])=="--textures-ignore-sampling-test");
             if(freezeClip) printf("[core-metal] DIAGNOSTIC NEGATIVE CONTROL: GPU clip frozen at frame 1; API camera still changes\n");
             attached = oapiRegisterGraphicsClient(client);
             if (!attached || !client->clbkInitialise()) throw std::runtime_error("graphics registration/init failed");

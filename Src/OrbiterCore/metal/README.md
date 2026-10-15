@@ -153,7 +153,7 @@ The runner repeats both camera modes three times and reports actual observed
 presentation counts instead of requiring or fabricating them. Offscreen clear,
 mesh and camera regression oracles/signatures are unchanged.
 
-## Bounded opaque diffuse-material pass (textures NOT implemented)
+## Bounded opaque diffuse-material pass (untextured, preserved)
 
 `--materials snapshot.ppm` is a separate opt-in engine-camera mode preserving the
 scenario camera. `--materials-test snapshot.ppm` uses two explicit API-controlled
@@ -200,23 +200,86 @@ reference image, requires material-specific dark pixels, and asserts unchanged
 white-material pixels and silhouette. Offscreen and hidden-drawable snapshots
 match byte-for-byte; hidden submission still does not establish visible scanout.
 
-**Texture dependency blocker / honest fallback:** the actual SDK entry point is
-`oapiGetTextureHandle(mesh,index)` (1-based), not `oapiMeshTexture`. The DG external
-template declares ten textures; all ten actual engine handles are null. The
-material-mode callback records 124 real load requests (including UI/base/cockpit
-assets), returns null for every request and reports zero successes. There is no
-owned Metal SURFHANDLE repository, global-resource cache/release contract, or
-vessel UV/texture draw path yet. No fake texture or white stand-in is returned.
-The existing portable terrain decoder (`Src/Bootstrap/TerrainArchive.cpp`) is
-private to its translation unit and **not safe to reuse as a verified DDS decoder**:
-its BC1 four-color branch interpolates 3:1 / 1:3 instead of BC1's 2:1 / 1:2, and
-forces alpha to 255 even for the BC1 transparent selector. It supports no BC2/BC3.
-DG's declared external diffuse assets are staged BC1 DDS files; additional real
-cockpit requests include BC3. A correct bounded decoder or verified system path,
-owned registry, texture-root/case resolution and UV GPU oracle are prerequisites
-for a follow-up texture slice. This is an implementation/validation blocker,
-not evidence that Metal or these assets cannot support textures. Nothing here
-claims texture rendering or addresses terrain/surfaces/Sketchpad/HUD.
+Material-only and all older modes deliberately continue returning null from
+texture load callbacks. Their original byte-for-byte images and texture callback
+accounting are preserved. Texture loading is enabled only by the separate modes
+below; no fake texture or white stand-in is returned on failure.
+
+## Bounded real static-vessel diffuse texture pass
+
+`--textures snapshot.ppm` preserves the actual scenario camera;
+`--textures-test snapshot.ppm` uses two explicit engine API-controlled upper views
+at a closer distance for inspecting the real DG livery. The diagnostic-only
+`--textures-ignore-sampling-test` creates the **same actual engine texture handles,
+uploads, UVs and group draws**, but disables sampling in the fragment shader.
+Append `--hidden-present` for hidden drawable rendering; no focus/input is used.
+
+`texture_store.h` owns stable opaque handle identities, a global bit-3 repository,
+independent non-global owners, and mesh pins. Foreign/stale handles are rejected
+before Metal access. Global loads reuse the same canonical-file handle until
+graphics destruction; releasing a global handle is harmless. Non-global loads
+have distinct handles; a release drops their owner, but pinned mesh draws retain
+them until detach. Tombstones prevent stale identity reuse (4096 identities max).
+Normal engine shutdown flushes templates and destroys the world before
+`clbkDestroyRenderWindow`, which destroys the store; mesh pins and UV/color copies
+are released before world teardown, after synchronous GPU completion.
+
+Lookup uses the **actual Config HightexDir, then TextureDir**, normalizes Windows
+separators, and matches ASCII case-insensitively per component. Ambiguous sibling
+case matches fail rather than selecting arbitrarily. Absolute/drive/traversal
+paths and non-DDS names fail. Configured root symlinks are canonicalized (staged
+content uses them); child links must resolve inside that same canonical root.
+Final files are opened read-only with O_NOFOLLOW and checked as regular files.
+Reads are bounded to 128 MiB, decoding to 64 MiB/image, and retained residency to
+256 MiB using the larger of decoded byte count and Metal allocatedSize. Decoded
+CPU/file scratch bytes are transient, not additional retained cache copies.
+Missing/malformed/unsupported DDS, unknown flag bits, cap exhaustion or failed
+uploads return null. A referenced unavailable texture fails the bounded vessel
+pass explicitly instead of drawing it as successfully loaded white.
+
+The reviewed dependency-free DDS codec supplies BC1/BC2/BC3 mip-0 RGBA pixels;
+the separate terrain decoder is not reused. `metal_textures.h` uploads the real
+decoded image into shared `RGBA8Unorm` ShaderRead storage. Low flag bits 0/1/2 are
+fulfilled by system-visible shared/decompressed/mip0 storage. Higher bits fail.
+This is **mip0-only, nearest-repeat, unlit diffuse RGB × normal shade × sampled
+RGB, output alpha 1 with blending disabled**. Alpha is decoded but not blended;
+no sRGB conversion, full mip chain, lighting, HDR, animation or surface edits.
+
+Mesh templates and UVs come only from actual VESSEL/mesh APIs, not a second .msh
+parser. `MESHGROUP::TexIdx` is **zero-based** (0 means the first texture), while
+`oapiGetTextureHandle` is **one-based**. DEFAULT (-1) means no texture and INHERIT
+(-2) keeps the previous resolved slot, including hidden/empty groups. This follows
+`Mesh.cpp`'s file-loader decrement and D3D9Mesh::ProcessInherit's increment; do not
+confuse a group raw index with an API slot. Per-group index ranges bind the actual
+validated engine handle, or genuinely untextured branch, before each draw.
+
+```sh
+cmake -S Src/OrbiterCore/metal/tests \
+  -B /Users/redezem/.hermes/cache/scratch/orbiter-texture-cpu
+cmake --build /Users/redezem/.hermes/cache/scratch/orbiter-texture-cpu -j6
+TMPDIR=/Users/redezem/.hermes/cache/scratch ctest \
+  --test-dir /Users/redezem/.hermes/cache/scratch/orbiter-texture-cpu --output-on-failure
+python3 Src/OrbiterCore/metal/texture_regression.py \
+  out/build/macos-core-spike/Src/OrbiterCore/metal/orbiter-core-metal \
+  out/stage/content /Users/redezem/.hermes/cache/scratch/orbiter-texture-check
+# Optional --hidden-present. Python runner requires installed Pillow.
+```
+
+The GPU suite repeats three positive/ignored-sampling pairs, two views each,
+requires all ten real DG template handles, validates zero-based group-to-slot
+binding independently, real camera matrices, completed GPU work and teardown.
+Actual geometry/UV/material/range provenance is exported beside each PPM.
+An independent scalar sparse CPU rasterizer uses perspective-correct UV/shade,
+Pillow DDS decoding of the exact selected source files, and compares actual GPU
+RGB samples within 2 UNORM LSB. It excludes triangle/texel boundaries and
+near-coplanar layers within four Depth32Float ULP, based on geometry alone.
+Verified views have 254/333 independent samples (191/240 chromatic), zero
+mismatches, and deterministic images. Ignoring real sampling changes 62,588
+first-view pixels without changing the silhouette, and the independent texture
+oracle process exits nonzero. PPMs are pre-UI GPU readbacks, never synthesized
+CPU render evidence. Hidden/offscreen images match; actual scanout remains
+unproven. Scope remains the first static DG diffuse pass, not terrain, HUD,
+Sketchpad, general surfaces, animation or fully lit/transparent vessels.
 
 ## Review dispositions
 

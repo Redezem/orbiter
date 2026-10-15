@@ -6,9 +6,11 @@ find_library(CORE_FOUNDATION_FRAMEWORK Foundation REQUIRED)
 find_library(CORE_QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
 add_executable(orbiter-core-metal
     main.mm
+    dds/dds_decoder.cpp
     ${ORB_IMGUI_SRC}/backends/imgui_impl_metal.mm
 )
 target_compile_definitions(orbiter-core-metal PRIVATE ORBITER_NO_WIN32_SHELL)
+target_compile_features(orbiter-core-metal PRIVATE cxx_std_17)
 target_compile_options(orbiter-core-metal PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
 target_include_directories(orbiter-core-metal PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../shim
