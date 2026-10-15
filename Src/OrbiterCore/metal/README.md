@@ -153,6 +153,71 @@ The runner repeats both camera modes three times and reports actual observed
 presentation counts instead of requiring or fabricating them. Offscreen clear,
 mesh and camera regression oracles/signatures are unchanged.
 
+## Bounded opaque diffuse-material pass (textures NOT implemented)
+
+`--materials snapshot.ppm` is a separate opt-in engine-camera mode preserving the
+scenario camera. `--materials-test snapshot.ppm` uses two explicit API-controlled
+front/top views of the existing DeltaGlider template. The test-only
+`--materials-reference-test` uses exactly those views with the old grayscale
+shader. Original `--mesh` and all camera flags retain their original behavior.
+Append `--hidden-present` for the same hidden drawable path; no window is shown.
+
+The pass obtains each actual group material from `oapiMeshMaterialCount` and
+`oapiMeshMaterial` (zero-based indices), copies its normalized diffuse RGBA into
+an owned GPU buffer, and multiplies RGB by the existing diagnostic normal shade.
+`SPEC_DEFAULT` (-1) is opaque white, and `SPEC_INHERIT` (-2) resolves the previous
+group including hidden/empty groups. Material zero is NOT a no-material sentinel.
+Invalid indices or nonfinite/out-of-range diffuse values fail explicitly.
+RGBA is recorded, but this is deliberately an **opaque RGB-only pass**: alpha
+blending, specular/ambient/emissive lighting, texture sampling, animations and
+instance edits remain unsupported. It is not a faithful glass or lit-vessel pass.
+All material GPU bytes are client-owned copies; no material pointer survives
+upload. After completed GPU work they are released on visual detach, before
+engine world/template teardown. Normal ImGui init/newframe/render/shutdown remain
+active; the image oracle uses only pre-UI mesh GPU pixels.
+
+```sh
+python3 Src/OrbiterCore/metal/material_regression.py \
+  out/build/macos-core-spike/Src/OrbiterCore/metal/orbiter-core-metal \
+  out/stage/content /Users/redezem/.hermes/cache/scratch/orbiter-material-check
+# Repeat with --hidden-present appended.
+c++ -std=c++17 Src/OrbiterCore/metal/test_material_semantics.cpp \
+  -o /Users/redezem/.hermes/cache/scratch/orbiter-material-semantics-test
+/Users/redezem/.hermes/cache/scratch/orbiter-material-semantics-test
+```
+
+Each runner executes three paired 12-frame real-engine lifecycles and validates
+GPU completion, engine projection/bound matrices, exact geometry silhouettes,
+all-pixel diffuse/shade membership, deterministic snapshots, two changed views,
+and exact fixture material coverage. Real DG exposed material 24 is neutral
+(.235,.235,.235), not chromatic: it changes 445 and 343 pixels respectively from
+the grayscale reference, with every changed channel matching the engine diffuse
+multiplier within one UNORM LSB. The colored interior materials are occluded;
+no chromatic render support evidence is claimed. The original underside camera
+views expose only white materials, so comparing those would falsely pass a
+material-ignoring shader. The dedicated oracle rejects an actual grayscale
+reference image, requires material-specific dark pixels, and asserts unchanged
+white-material pixels and silhouette. Offscreen and hidden-drawable snapshots
+match byte-for-byte; hidden submission still does not establish visible scanout.
+
+**Texture dependency blocker / honest fallback:** the actual SDK entry point is
+`oapiGetTextureHandle(mesh,index)` (1-based), not `oapiMeshTexture`. The DG external
+template declares ten textures; all ten actual engine handles are null. The
+material-mode callback records 124 real load requests (including UI/base/cockpit
+assets), returns null for every request and reports zero successes. There is no
+owned Metal SURFHANDLE repository, global-resource cache/release contract, or
+vessel UV/texture draw path yet. No fake texture or white stand-in is returned.
+The existing portable terrain decoder (`Src/Bootstrap/TerrainArchive.cpp`) is
+private to its translation unit and **not safe to reuse as a verified DDS decoder**:
+its BC1 four-color branch interpolates 3:1 / 1:3 instead of BC1's 2:1 / 1:2, and
+forces alpha to 255 even for the BC1 transparent selector. It supports no BC2/BC3.
+DG's declared external diffuse assets are staged BC1 DDS files; additional real
+cockpit requests include BC3. A correct bounded decoder or verified system path,
+owned registry, texture-root/case resolution and UV GPU oracle are prerequisites
+for a follow-up texture slice. This is an implementation/validation blocker,
+not evidence that Metal or these assets cannot support textures. Nothing here
+claims texture rendering or addresses terrain/surfaces/Sketchpad/HUD.
+
 ## Review dispositions
 
 Independent review requested staging safety and UI-isolated camera image checks;

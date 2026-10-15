@@ -25,19 +25,23 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <array>
+#include "material_semantics.h"
 
 extern Orbiter *g_pOrbiter;
 
 class CoreMetalClient final : public oapi::GraphicsClient {
 public:
-    explicit CoreMetalClient(bool present, std::string snapshot = {}, bool engineCamera = false, bool freezeClip = false)
-        : GraphicsClient(nullptr), present_(present), engine_camera_(engineCamera), freeze_clip_(freezeClip), snapshot_(std::move(snapshot)) {}
-    void setTestCamera(unsigned view) {
+    explicit CoreMetalClient(bool present, std::string snapshot = {}, bool engineCamera = false, bool freezeClip = false, bool materials = false)
+        : GraphicsClient(nullptr), present_(present), engine_camera_(engineCamera), freeze_clip_(freezeClip), materials_(materials), snapshot_(std::move(snapshot)) {}
+    void setTestCamera(unsigned view, bool materialViews=false) {
         check(engine_camera_ && (view == 1 || view == 2), "invalid controlled camera");
         CameraMode_Track mode;
         mode.SetTarget(visual_object_);
         mode.SetTrackMode(CameraMode_Track::TM_RELATIVE);
-        mode.SetPosition(4.0, view == 1 ? 0.4 : 1.1, view == 1 ? 0.3 : 0.5);
+        // Material views look down onto actual canopy materials rather than the
+        // original camera regression's all-white underside. Original views unchanged.
+        mode.SetPosition(4.0, materialViews ? (view == 1 ? 2.74 : 2.04) : (view == 1 ? 0.4 : 1.1), materialViews ? (view == 1 ? -0.6 : -0.8) : (view == 1 ? 0.3 : 0.5));
         mode.SetFOV(40.0); // full vertical FOV in degrees; engine API aperture is half-FOV radians.
         check(oapiSetCameraMode(mode), "engine camera mode rejected");
         controlled_view_=view;
@@ -53,6 +57,8 @@ public:
         struct SourceVertex { double x,y,z; float shade; };
         std::vector<SourceVertex> source;
         std::vector<uint32_t> indices;
+        std::vector<std::array<float,4>> colors;
+        if(materials_) printf("[core-metal] materials_mode=opaque-diffuse-only textures=unsupported; alpha stored but not blended; no specular/emissive/scene lighting\n");
         printf("[core-metal] camera_mode=%s\n",engine_camera_ ? "engine world perspective" : "diagnostic vessel-local orthographic auto-fit fixed-oblique; NOT engine camera");
         const unsigned mesh_count = vessel->GetMeshCount();
         for (unsigned m=0; m<mesh_count; ++m) {
@@ -63,11 +69,31 @@ public:
             VECTOR3 offset;
             check(vessel->GetMeshOffset(m, offset), "mesh offset missing");
             unsigned before = indices.size();
+            if(materials_) {
+                unsigned available=0;
+                for(DWORD t=1;t<=oapiMeshTextureCount(mesh);++t) if(oapiGetTextureHandle(mesh,t)) ++available;
+                printf("[core-metal] material_mesh=%u engine_materials=%u engine_textures=%u nonnull_texture_handles=%u\n",m,oapiMeshMaterialCount(mesh),oapiMeshTextureCount(mesh),available);
+            }
+            unsigned previousMaterial=core_metal::defaultMaterial;
             for (DWORD g=0; g<oapiMeshGroupCount(mesh); ++g) {
                 MESHGROUP *group = oapiMeshGroup(mesh,g);
                 check(group != nullptr, "null engine mesh group");
-                // Bit 1 means do not render. Other group flags/textures/materials are not supported.
+                std::array<float,4> diffuse={1,1,1,1};
+                if(materials_) {
+                    unsigned resolved=core_metal::resolveMaterial(group->MtrlIdx,previousMaterial,oapiMeshMaterialCount(mesh));
+                    if(resolved!=core_metal::defaultMaterial) {
+                        const MATERIAL *material=oapiMeshMaterial(mesh,resolved);
+                        check(material!=nullptr,"engine material missing");
+                        const auto &d=material->diffuse;
+                        check(core_metal::validDiffuse(d.r,d.g,d.b,d.a),"unsupported diffuse value (requires finite normalized RGBA)");
+                        diffuse={d.r,d.g,d.b,d.a};
+                    }
+                    printf("[core-metal] material_json={\"mesh\":%u,\"group\":%u,\"raw\":%u,\"resolved\":%u,\"source\":\"%s\",\"texture_index\":%u,\"diffuse\":[%.9g,%.9g,%.9g,%.9g]}\n",m,g,group->MtrlIdx,resolved,resolved==core_metal::defaultMaterial ? "default" : "engine",group->TexIdx,diffuse[0],diffuse[1],diffuse[2],diffuse[3]);
+                }
+                // Bit 1 means do not render. Other flags/textures remain unsupported;
+                // the opt-in material pass only consumes the resolved diffuse RGB.
                 if ((group->UsrFlag & 2) || !group->nIdx) continue;
+                if(materials_) material_palette_.push_back(diffuse);
                 check(group->Vtx && group->Idx && group->nVtx && group->nIdx % 3 == 0, "invalid triangle group");
                 uint32_t base = static_cast<uint32_t>(source.size());
                 for (DWORD i=0; i<group->nVtx; ++i) {
@@ -79,6 +105,7 @@ public:
                                       engine_camera_ ? y : -0.36*x+0.8*y-0.48*z,
                                       engine_camera_ ? z : 0.48*x+0.6*y+0.64*z,
                                       0.35f+0.6f*std::abs(0.48f*v.nx+0.6f*v.ny+0.64f*v.nz)});
+                    if(materials_) colors.push_back(diffuse);
                 }
                 for (DWORD i=0;i<group->nIdx;++i) {
                     check(group->Idx[i] < group->nVtx, "mesh index out of bounds");
@@ -110,8 +137,14 @@ public:
         mesh_indices_=[device_ newBufferWithBytes:indices.data() length:indices.size()*sizeof(uint32_t) options:MTLResourceStorageModeShared];
         uploaded_vertices=vertices.size(); uploaded_triangles=indices.size()/3;
         check(mesh_vertices_ && mesh_indices_, "mesh GPU upload failed");
+        if(materials_) {
+            check(colors.size()==vertices.size(),"material vertex count");
+            material_colors_=[device_ newBufferWithBytes:colors.data() length:colors.size()*sizeof(colors[0]) options:MTLResourceStorageModeShared];
+            check(material_colors_!=nil,"material GPU upload failed");
+        }
         NSError *error=nil;
         NSString *shader=@"#include <metal_stdlib>\nusing namespace metal;\nstruct V { float4 p; }; struct O { float4 p [[position]]; float shade; };\nvertex O mesh_vertex(uint i [[vertex_id]], const device V* v [[buffer(0)]], constant float4x4& clip [[buffer(1)]]) { O o; o.p=clip*float4(v[i].p.xyz,1); o.shade=v[i].p.w; return o; }\nfragment float4 mesh_fragment(O i [[stage_in]]) { return float4(i.shade,i.shade,i.shade,1); }";
+        if(materials_) shader=@"#include <metal_stdlib>\nusing namespace metal;\nstruct V { float4 p; }; struct O { float4 p [[position]]; float shade; float4 diffuse; };\nvertex O mesh_vertex(uint i [[vertex_id]], const device V* v [[buffer(0)]], constant float4x4& clip [[buffer(1)]], const device float4* colors [[buffer(2)]]) { O o; o.p=clip*float4(v[i].p.xyz,1); o.shade=v[i].p.w; o.diffuse=colors[i]; return o; }\nfragment float4 mesh_fragment(O i [[stage_in]]) { return float4(i.diffuse.rgb*i.shade,1); }";
         id<MTLLibrary> library=[device_ newLibraryWithSource:shader options:nil error:&error];
         if(!library) throw std::runtime_error(error.description.UTF8String);
         auto pipeline=[MTLRenderPipelineDescriptor new];
@@ -130,6 +163,12 @@ public:
     }
     void detachFocusMesh() {
         if(visual_object_) { UnregisterVisObject(visual_object_); visual_object_=nullptr; ++visual_unregister; }
+        // All command buffers are synchronously completed; no engine material pointer
+        // was retained. Drop the material GPU copy before world/template destruction.
+        if(materials_ && material_colors_) {
+            material_colors_=nil;
+            printf("[core-metal] material_resources_released=1 before_engine_teardown=1\n");
+        }
     }
     int clbkVisEvent(OBJHANDLE, VISHANDLE, DWORD, DWORD_PTR) override {
         ++unsupported_visual_events;
@@ -223,6 +262,13 @@ public:
         if (encoder_) ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), buffer_, encoder_);
     }
     uint64_t clbkImGuiSurfaceTexture(SURFHANDLE) override { return 0; }
+    SURFHANDLE clbkLoadTexture(const char *fname, DWORD flags=0) override {
+        if(materials_) {
+            ++unsupported_texture_loads_;
+            printf("[core-metal] unsupported_texture_request=%s flags=%u returned=null\n",fname,flags);
+        }
+        return nullptr; // No fake handles or white-texture stand-ins.
+    }
     bool verified(unsigned n) const {
         return updates == n && renders == n && newframes == n && drawdata == n &&
                displays == n && completed == n && errors == 0 && readbacks == n &&
@@ -237,6 +283,7 @@ public:
         printf("[core-metal] drawable_acquired=%u present_scheduled=%u actual_presented=%u hidden_checks=%u\n",acquired,scheduled,presented,hidden_checks);
         if (present_ && presented != scheduled) printf("[core-metal] hidden-window limitation: positive presentedTime observed for %u/%u submissions within 100ms/frame; scanout NOT established for remaining frames\n",presented,scheduled);
         if(engine_camera_) printf("[core-metal] camera_frames=%u\n",camera_frames_);
+        if(materials_) printf("[core-metal] texture_load_callbacks=%u texture_successes=0 textures_supported=0\n",unsupported_texture_loads_);
         printf("[core-metal] update=%u newframe=%u render=%u drawdata=%u display=%u completed=%u presented=%u readback=%u errors=%u\n",
                updates,newframes,renders,drawdata,displays,completed,presented,readbacks,errors);
         printf("[core-metal] create=%u close=%u destroy=%u imgui_init=%u imgui_shutdown=%u\n",
@@ -281,6 +328,7 @@ protected:
             [encoder_ setDepthStencilState:mesh_depth_state_];
             [encoder_ setCullMode:MTLCullModeNone];
             [encoder_ setVertexBuffer:mesh_vertices_ offset:0 atIndex:0];
+            if(materials_) [encoder_ setVertexBuffer:material_colors_ offset:0 atIndex:2];
             if (!freeze_clip_ || renders==1) std::copy(clip_,clip_+16,gpu_clip_);
             [encoder_ setVertexBytes:gpu_clip_ length:sizeof(gpu_clip_) atIndex:1];
             if(engine_camera_) {
@@ -338,11 +386,19 @@ protected:
                 std::vector<unsigned char> pixels(width*height*4);
                 id<MTLTexture> source = engine_camera_ ? mesh_oracle_ : target_;
                 [source getBytes:pixels.data() bytesPerRow:width*4 fromRegion:MTLRegionMake2D(0,0,width,height) mipmapLevel:0];
-                unsigned background=0,geometry=0;
+                unsigned background=0,geometry=0,chromatic=0,invalid=0;
                 for (size_t i=0;i<pixels.size();i+=4) {
                     const auto *p=&pixels[i];
-                    if(p[0]==128&&p[1]==64&&p[2]==32&&p[3]==255) ++background;
-                    if(p[0]==p[1]&&p[1]==p[2]&&p[0]>=80&&p[3]==255) ++geometry;
+                    if(p[0]==128&&p[1]==64&&p[2]==32&&p[3]==255) { ++background; continue; }
+                    if(materials_) {
+                        bool allowed=std::any_of(material_palette_.begin(),material_palette_.end(),[p](const auto &color){ return core_metal::diffusePixel(p,color.data()); });
+                        if(allowed) { ++geometry; if(p[0]!=p[1] || p[1]!=p[2]) ++chromatic; }
+                        else ++invalid;
+                    } else if(p[0]==p[1]&&p[1]==p[2]&&p[0]>=80&&p[3]==255) ++geometry;
+                }
+                if(materials_) {
+                    check(invalid==0,"GPU non-material palette (mesh-only oracle)");
+                    printf("[core-metal] material_pixels frame=%u chromatic=%u invalid=%u geometry=%u\n",completed,chromatic,invalid,geometry);
                 }
                 check(background>1000 && geometry>1000, "GPU mesh/background pixel counts");
                 ++geometry_readbacks;
@@ -434,6 +490,7 @@ private:
         printf("]}\n");
     }
     void release() {
+        material_colors_=nil; material_palette_.clear();
         mesh_vertices_=nil; mesh_indices_=nil; mesh_pipeline_=nil; mesh_depth_state_=nil; mesh_depth_=nil;
         mesh_oracle_=nil;
         encoder_ = nil; buffer_ = nil; drawable_ = nil; target_ = nil; queue_ = nil; layer_ = nil; device_ = nil;
@@ -444,9 +501,11 @@ private:
         if (sdl_) SDL_Quit();
         sdl_ = false;
     }
-    bool present_, engine_camera_=false, freeze_clip_=false, sdl_ = false, imgui_ready_ = false;
+    bool present_, engine_camera_=false, freeze_clip_=false, materials_=false, sdl_ = false, imgui_ready_ = false;
+    id<MTLBuffer> material_colors_=nil;
+    std::vector<std::array<float,4>> material_palette_;
     float gpu_clip_[16]={};
-    unsigned camera_frames_=0, controlled_view_=0;
+    unsigned camera_frames_=0, controlled_view_=0, unsupported_texture_loads_=0;
     bool second_snapshot_=false;
     VECTOR3 sample_local_={};
     // Column-major Metal matrix. Diagnostic vertices are already clip coordinates.
@@ -477,7 +536,7 @@ private:
 
 int main(int argc, char **argv) {
     if (argc < 3 || argc > 6) {
-        fprintf(stderr,"Usage (from content root): orbiter-core-metal <scenario> <frames 1..10000> [--mesh snapshot.ppm | --engine-camera snapshot.ppm | --engine-camera-test snapshot.ppm | --diagnostic-frozen-camera-test snapshot.ppm] [--hidden-present]\n");
+        fprintf(stderr,"Usage (from content root): orbiter-core-metal <scenario> <frames 1..10000> [--mesh snapshot.ppm | --engine-camera snapshot.ppm | --engine-camera-test snapshot.ppm | --diagnostic-frozen-camera-test snapshot.ppm | --materials snapshot.ppm | --materials-test snapshot.ppm | --materials-reference-test snapshot.ppm] [--hidden-present]\n");
         return 2;
     }
     char *end = nullptr;
@@ -486,10 +545,12 @@ int main(int argc, char **argv) {
     int modeArgc=argc-(present ? 1 : 0);
     if (!end || *end || frames < 1 || frames > 10000 ||
         (modeArgc != 3 && modeArgc != 5) ||
-        (modeArgc == 5 && ((std::string(argv[3]) != "--mesh" && std::string(argv[3]) != "--engine-camera" && std::string(argv[3]) != "--engine-camera-test" && std::string(argv[3]) != "--diagnostic-frozen-camera-test") || !argv[4][0]))) return 2;
+        (modeArgc == 5 && ((std::string(argv[3]) != "--mesh" && std::string(argv[3]) != "--engine-camera" && std::string(argv[3]) != "--engine-camera-test" && std::string(argv[3]) != "--diagnostic-frozen-camera-test" && std::string(argv[3]) != "--materials" && std::string(argv[3]) != "--materials-test" && std::string(argv[3]) != "--materials-reference-test") || !argv[4][0]))) return 2;
     bool engineCamera=modeArgc==5 && std::string(argv[3])!="--mesh";
     bool freezeClip=modeArgc==5 && std::string(argv[3])=="--diagnostic-frozen-camera-test";
-    bool cameraTest=modeArgc==5 && (std::string(argv[3])=="--engine-camera-test" || freezeClip);
+    bool materials=modeArgc==5 && (std::string(argv[3])=="--materials" || std::string(argv[3])=="--materials-test");
+    bool materialViews=modeArgc==5 && (std::string(argv[3])=="--materials-test" || std::string(argv[3])=="--materials-reference-test");
+    bool cameraTest=modeArgc==5 && (std::string(argv[3])=="--engine-camera-test" || materialViews || freezeClip);
     if(cameraTest && frames<2) return 2;
     setvbuf(stdout, nullptr, _IONBF, 0);
     @autoreleasepool {
@@ -507,7 +568,7 @@ int main(int argc, char **argv) {
                 throw std::runtime_error("core native Create returned no CDIFramework7");
             g_pOrbiter->Cfg()->CfgDebugPrm.ShutdownMode = 0;
             g_pOrbiter->SetFastExit(false);
-            client = new CoreMetalClient(present, modeArgc == 5 ? argv[4] : "", engineCamera, freezeClip);
+            client = new CoreMetalClient(present, modeArgc == 5 ? argv[4] : "", engineCamera, freezeClip, materials);
             if(freezeClip) printf("[core-metal] DIAGNOSTIC NEGATIVE CONTROL: GPU clip frozen at frame 1; API camera still changes\n");
             attached = oapiRegisterGraphicsClient(client);
             if (!attached || !client->clbkInitialise()) throw std::runtime_error("graphics registration/init failed");
@@ -517,7 +578,7 @@ int main(int argc, char **argv) {
             printf("[core-metal] focus=%s scenario=%s frames=%ld\n", oapiGetFocusInterface()->GetName(), argv[1], frames);
             client->attachFocusMesh();
             for (long i=0; i<frames; ++i) { @autoreleasepool {
-                if(cameraTest && (i==0 || i==frames/2)) client->setTestCamera(i==0 ? 1 : 2);
+                if(cameraTest && (i==0 || i==frames/2)) client->setTestCamera(i==0 ? 1 : 2,materialViews);
                 g_pOrbiter->SingleFrame();
             } }
             client->detachFocusMesh();
