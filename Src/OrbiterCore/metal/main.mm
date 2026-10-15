@@ -30,8 +30,19 @@ extern Orbiter *g_pOrbiter;
 
 class CoreMetalClient final : public oapi::GraphicsClient {
 public:
-    explicit CoreMetalClient(bool present, std::string snapshot = {})
-        : GraphicsClient(nullptr), present_(present), snapshot_(std::move(snapshot)) {}
+    explicit CoreMetalClient(bool present, std::string snapshot = {}, bool engineCamera = false, bool freezeClip = false)
+        : GraphicsClient(nullptr), present_(present), engine_camera_(engineCamera), freeze_clip_(freezeClip), snapshot_(std::move(snapshot)) {}
+    void setTestCamera(unsigned view) {
+        check(engine_camera_ && (view == 1 || view == 2), "invalid controlled camera");
+        CameraMode_Track mode;
+        mode.SetTarget(visual_object_);
+        mode.SetTrackMode(CameraMode_Track::TM_RELATIVE);
+        mode.SetPosition(4.0, view == 1 ? 0.4 : 1.1, view == 1 ? 0.3 : 0.5);
+        mode.SetFOV(40.0); // full vertical FOV in degrees; engine API aperture is half-FOV radians.
+        check(oapiSetCameraMode(mode), "engine camera mode rejected");
+        controlled_view_=view;
+        printf("[core-metal] test-controlled engine camera view=%u; NOT scenario camera\n",view);
+    }
     void attachFocusMesh() {
         if (snapshot_.empty()) return;
         VESSEL *vessel = oapiGetFocusInterface();
@@ -42,7 +53,7 @@ public:
         struct SourceVertex { double x,y,z; float shade; };
         std::vector<SourceVertex> source;
         std::vector<uint32_t> indices;
-        printf("[core-metal] diagnostic_camera=vessel-local orthographic auto-fit fixed-oblique; NOT engine camera\n");
+        printf("[core-metal] camera_mode=%s\n",engine_camera_ ? "engine world perspective" : "diagnostic vessel-local orthographic auto-fit fixed-oblique; NOT engine camera");
         const unsigned mesh_count = vessel->GetMeshCount();
         for (unsigned m=0; m<mesh_count; ++m) {
             WORD visibility = vessel->GetMeshVisibilityMode(m);
@@ -64,8 +75,9 @@ public:
                     double x=v.x+offset.x,y=v.y+offset.y,z=v.z+offset.z;
                     check(std::isfinite(x)&&std::isfinite(y)&&std::isfinite(z), "nonfinite mesh vertex");
                     // Right/up/depth form a fixed orthonormal diagnostic view, not engine camera support.
-                    source.push_back({0.8*x-0.6*z, -0.36*x+0.8*y-0.48*z,
-                                      0.48*x+0.6*y+0.64*z,
+                    source.push_back({engine_camera_ ? x : 0.8*x-0.6*z,
+                                      engine_camera_ ? y : -0.36*x+0.8*y-0.48*z,
+                                      engine_camera_ ? z : 0.48*x+0.6*y+0.64*z,
                                       0.35f+0.6f*std::abs(0.48f*v.nx+0.6f*v.ny+0.64f*v.nz)});
                 }
                 for (DWORD i=0;i<group->nIdx;++i) {
@@ -90,15 +102,16 @@ public:
         struct GPUVertex { float x,y,z,shade; };
         std::vector<GPUVertex> vertices;
         for(const auto &v:source) vertices.push_back({
-            float((v.x-(lo[0]+hi[0])*0.5)*scale*height/width),
-            float((v.y-(lo[1]+hi[1])*0.5)*scale),
-            float(0.1+0.8*(hi[2]-v.z)/depth), std::clamp(v.shade,0.35f,0.95f)});
+            float(engine_camera_ ? v.x : (v.x-(lo[0]+hi[0])*0.5)*scale*height/width),
+            float(engine_camera_ ? v.y : (v.y-(lo[1]+hi[1])*0.5)*scale),
+            float(engine_camera_ ? v.z : 0.1+0.8*(hi[2]-v.z)/depth), std::clamp(v.shade,0.35f,0.95f)});
+        sample_local_ = _V(vertices[0].x, vertices[0].y, vertices[0].z);
         mesh_vertices_=[device_ newBufferWithBytes:vertices.data() length:vertices.size()*sizeof(GPUVertex) options:MTLResourceStorageModeShared];
         mesh_indices_=[device_ newBufferWithBytes:indices.data() length:indices.size()*sizeof(uint32_t) options:MTLResourceStorageModeShared];
         uploaded_vertices=vertices.size(); uploaded_triangles=indices.size()/3;
         check(mesh_vertices_ && mesh_indices_, "mesh GPU upload failed");
         NSError *error=nil;
-        NSString *shader=@"#include <metal_stdlib>\nusing namespace metal;\nstruct V { float4 p; }; struct O { float4 p [[position]]; float shade; };\nvertex O mesh_vertex(uint i [[vertex_id]], const device V* v [[buffer(0)]]) { O o; o.p=float4(v[i].p.xyz,1); o.shade=v[i].p.w; return o; }\nfragment float4 mesh_fragment(O i [[stage_in]]) { return float4(i.shade,i.shade,i.shade,1); }";
+        NSString *shader=@"#include <metal_stdlib>\nusing namespace metal;\nstruct V { float4 p; }; struct O { float4 p [[position]]; float shade; };\nvertex O mesh_vertex(uint i [[vertex_id]], const device V* v [[buffer(0)]], constant float4x4& clip [[buffer(1)]]) { O o; o.p=clip*float4(v[i].p.xyz,1); o.shade=v[i].p.w; return o; }\nfragment float4 mesh_fragment(O i [[stage_in]]) { return float4(i.shade,i.shade,i.shade,1); }";
         id<MTLLibrary> library=[device_ newLibraryWithSource:shader options:nil error:&error];
         if(!library) throw std::runtime_error(error.description.UTF8String);
         auto pipeline=[MTLRenderPipelineDescriptor new];
@@ -145,6 +158,10 @@ public:
         desc.storageMode = MTLStorageModeShared;
         target_ = [device_ newTextureWithDescriptor:desc];
         if (!target_) return fail("offscreen texture unavailable");
+        if (engine_camera_) {
+            mesh_oracle_ = [device_ newTextureWithDescriptor:desc];
+            if (!mesh_oracle_) return fail("mesh oracle texture unavailable");
+        }
         printf("[core-metal] device=%s mode=%s hidden=1\n", device_.name.UTF8String,
                present_ ? "hidden-present" : "offscreen");
         return true;
@@ -181,6 +198,23 @@ public:
     void clbkImGuiRenderDrawData() override {
         ++drawdata;
         check(renders == drawdata && displays + 1 == renders, "render/drawdata order");
+        if (engine_camera_) {
+            // Preserve GPU scene pixels BEFORE the real engine ImGui compositing.
+            [encoder_ endEncoding];
+            encoder_ = nil;
+            auto copy = [buffer_ blitCommandEncoder];
+            [copy copyFromTexture:target_ sourceSlice:0 sourceLevel:0
+                  sourceOrigin:MTLOriginMake(0,0,0) sourceSize:MTLSizeMake(width,height,1)
+                  toTexture:mesh_oracle_ destinationSlice:0 destinationLevel:0
+                  destinationOrigin:MTLOriginMake(0,0,0)];
+            [copy endEncoding];
+            auto ui = [MTLRenderPassDescriptor renderPassDescriptor];
+            ui.colorAttachments[0].texture = target_;
+            ui.colorAttachments[0].loadAction = MTLLoadActionLoad;
+            ui.colorAttachments[0].storeAction = MTLStoreActionStore;
+            encoder_ = [buffer_ renderCommandEncoderWithDescriptor:ui];
+            check(copy && encoder_, "mesh oracle/UI encoding failed");
+        }
         ImGui::Render();
         if (encoder_) ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), buffer_, encoder_);
     }
@@ -192,9 +226,11 @@ public:
                imgui_init == 1 && imgui_shutdown == 1 &&
                (snapshot_.empty() || (uploaded_meshes > 0 && uploaded_triangles > 0 &&
                  mesh_draw_calls == n && drawn_triangles == uploaded_triangles*n &&
-                 geometry_readbacks == n && visual_register == 1 && visual_unregister == 1));
+                 geometry_readbacks == n && visual_register == 1 && visual_unregister == 1)) &&
+               (!engine_camera_ || camera_frames_ == n);
     }
     void report() const {
+        if(engine_camera_) printf("[core-metal] camera_frames=%u\n",camera_frames_);
         printf("[core-metal] update=%u newframe=%u render=%u drawdata=%u display=%u completed=%u presented=%u readback=%u errors=%u\n",
                updates,newframes,renders,drawdata,displays,completed,presented,readbacks,errors);
         printf("[core-metal] create=%u close=%u destroy=%u imgui_init=%u imgui_shutdown=%u\n",
@@ -213,6 +249,7 @@ protected:
     void clbkRenderScene() override {
         ++renders;
         check(newframes == renders && displays + 1 == renders, "newframe/render order");
+        if(engine_camera_) updateEngineCamera();
         drawable_ = present_ ? [layer_ nextDrawable] : nil;
         if (present_ && !drawable_) throw std::runtime_error("hidden layer returned no drawable");
         auto pass = [MTLRenderPassDescriptor renderPassDescriptor];
@@ -234,6 +271,13 @@ protected:
             [encoder_ setDepthStencilState:mesh_depth_state_];
             [encoder_ setCullMode:MTLCullModeNone];
             [encoder_ setVertexBuffer:mesh_vertices_ offset:0 atIndex:0];
+            if (!freeze_clip_ || renders==1) std::copy(clip_,clip_+16,gpu_clip_);
+            [encoder_ setVertexBytes:gpu_clip_ length:sizeof(gpu_clip_) atIndex:1];
+            if(engine_camera_) {
+                printf("[core-metal] gpu_clip_json=[");
+                for(int i=0;i<16;++i) printf("%s%.17g",i ? "," : "",double(gpu_clip_[i]));
+                printf("]\n");
+            }
             [encoder_ drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:uploaded_triangles*3
                 indexType:MTLIndexTypeUInt32 indexBuffer:mesh_indices_ indexBufferOffset:0];
             ++mesh_draw_calls; drawn_triangles+=uploaded_triangles;
@@ -263,7 +307,8 @@ protected:
             ++readbacks;
             if (mesh_pipeline_) {
                 std::vector<unsigned char> pixels(width*height*4);
-                [target_ getBytes:pixels.data() bytesPerRow:width*4 fromRegion:MTLRegionMake2D(0,0,width,height) mipmapLevel:0];
+                id<MTLTexture> source = engine_camera_ ? mesh_oracle_ : target_;
+                [source getBytes:pixels.data() bytesPerRow:width*4 fromRegion:MTLRegionMake2D(0,0,width,height) mipmapLevel:0];
                 unsigned background=0,geometry=0;
                 for (size_t i=0;i<pixels.size();i+=4) {
                     const auto *p=&pixels[i];
@@ -272,8 +317,9 @@ protected:
                 }
                 check(background>1000 && geometry>1000, "GPU mesh/background pixel counts");
                 ++geometry_readbacks;
-                if (completed==1) {
-                    FILE *f=fopen(snapshot_.c_str(),"wb");
+                if (completed==1 || (controlled_view_==2 && !second_snapshot_)) {
+                    std::string path = completed==1 ? snapshot_ : snapshot_+".view2.ppm";
+                    FILE *f=fopen(path.c_str(),"wb");
                     check(f!=nullptr,"snapshot open failed");
                     bool ok=fprintf(f,"P6\n%u %u\n255\n",width,height)>0;
                     std::vector<unsigned char> rgb(width*height*3);
@@ -283,7 +329,8 @@ protected:
                     ok=(fwrite(rgb.data(),1,rgb.size(),f)==rgb.size()) && ok;
                     ok=(fclose(f)==0) && ok;
                     check(ok,"snapshot write failed");
-                    printf("[core-metal] GPU pixels background=%u geometry=%u snapshot=%s\n",background,geometry,snapshot_.c_str());
+                    if(completed!=1) second_snapshot_=true;
+                    printf("[core-metal] GPU pixels background=%u geometry=%u snapshot=%s\n",background,geometry,path.c_str());
                 }
             }
         }
@@ -301,8 +348,65 @@ private:
     static constexpr DWORD width = 640, height = 480;
     static void check(bool ok, const char *message) { if (!ok) throw std::runtime_error(message); }
     bool fail(const char *message) { fprintf(stderr,"[core-metal] init: %s\n",message); return false; }
+    void updateEngineCamera() {
+        VECTOR3 camera, vessel, direction;
+        MATRIX3 cameraRotation, vesselRotation;
+        oapiCameraGlobalPos(&camera);
+        oapiCameraRotationMatrix(&cameraRotation);
+        oapiCameraGlobalDir(&direction);
+        oapiGetGlobalPos(visual_object_, &vessel);
+        oapiGetRotationMatrix(visual_object_, &vesselRotation);
+        double aperture=oapiCameraAperture();
+        printf("[core-metal] raw camera=%.17g,%.17g,%.17g vessel=%.17g,%.17g,%.17g cameraR=",camera.x,camera.y,camera.z,vessel.x,vessel.y,vessel.z);
+        for(int i=0;i<9;++i) printf(" %.17g",cameraRotation.data[i]);
+        printf(" vesselR=");
+        for(int i=0;i<9;++i) printf(" %.17g",vesselRotation.data[i]);
+        printf("\n");
+        check(std::isfinite(aperture) && aperture>0 && aperture<1.5707963267948966, "invalid engine aperture");
+        // SDK matrices multiply column vectors: vessel local -> global, camera local -> global.
+        // Subtract global positions in DOUBLE first (heliocentric values can be ~1e11 m).
+        // Do not add each local point to the huge global position before subtracting.
+        VECTOR3 relative=vessel-camera;
+        VECTOR3 viewTranslation=tmul(cameraRotation,relative);
+        MATRIX3 viewRotation=mul(transp(cameraRotation),vesselRotation);
+        // Orbiter camera looks along +Z, +X right, +Y up (Camera.cpp / D3D9 Scene.cpp).
+        // Metal clip accepts that same X/Y and 0<=Z<=W. No OpenGL -Z or Y flip:
+        // Metal's viewport maps +NDC Y upward into the top-left-origin render target.
+        // Client-owned bounded vessel frustum, not claimed to be engine near/far policy.
+        constexpr double nearPlane=0.1, farPlane=1000000.0;
+        double sy=1.0/std::tan(aperture), sx=sy*height/width;
+        double a=farPlane/(farPlane-nearPlane), b=-nearPlane*a;
+        for(unsigned col=0;col<4;++col) {
+            double x=col<3 ? viewRotation.data[col] : viewTranslation.x;
+            double y=col<3 ? viewRotation.data[3+col] : viewTranslation.y;
+            double z=col<3 ? viewRotation.data[6+col] : viewTranslation.z;
+            double values[4]={sx*x,sy*y,a*z+(col==3 ? b : 0),z};
+            for(unsigned row=0;row<4;++row) {
+                clip_[col*4+row]=static_cast<float>(values[row]);
+                check(std::isfinite(clip_[col*4+row]), "nonfinite engine clip matrix");
+            }
+        }
+        ++camera_frames_;
+        // Exact input doubles and computed float matrix; GPU binding logged separately.
+        printf("[core-metal] camera_json={\"frame\":%u,\"controlled_view\":%u",renders,controlled_view_);
+        auto vector=[](const char *key,const VECTOR3 &v) {
+            printf(",\"%s\":[%.17g,%.17g,%.17g]",key,v.x,v.y,v.z);
+        };
+        auto matrix=[](const char *key,const MATRIX3 &m) {
+            printf(",\"%s\":[",key);
+            for(int i=0;i<9;++i) printf("%s%.17g",i ? "," : "",m.data[i]);
+            printf("]");
+        };
+        vector("camera_position",camera); vector("vessel_position",vessel);
+        vector("direction",direction); vector("sample_local",sample_local_);
+        matrix("camera_rotation",cameraRotation); matrix("vessel_rotation",vesselRotation);
+        printf(",\"aperture\":%.17g,\"near\":%.17g,\"far\":%.17g,\"clip_matrix\":[",aperture,nearPlane,farPlane);
+        for(int i=0;i<16;++i) printf("%s%.17g",i ? "," : "",double(clip_[i]));
+        printf("]}\n");
+    }
     void release() {
         mesh_vertices_=nil; mesh_indices_=nil; mesh_pipeline_=nil; mesh_depth_state_=nil; mesh_depth_=nil;
+        mesh_oracle_=nil;
         encoder_ = nil; buffer_ = nil; drawable_ = nil; target_ = nil; queue_ = nil; layer_ = nil; device_ = nil;
         if (view_) SDL_Metal_DestroyView(view_);
         view_ = nullptr;
@@ -311,13 +415,20 @@ private:
         if (sdl_) SDL_Quit();
         sdl_ = false;
     }
-    bool present_, sdl_ = false, imgui_ready_ = false;
+    bool present_, engine_camera_=false, freeze_clip_=false, sdl_ = false, imgui_ready_ = false;
+    float gpu_clip_[16]={};
+    unsigned camera_frames_=0, controlled_view_=0;
+    bool second_snapshot_=false;
+    VECTOR3 sample_local_={};
+    // Column-major Metal matrix. Diagnostic vertices are already clip coordinates.
+    float clip_[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
     std::string snapshot_;
     OBJHANDLE visual_object_=nullptr;
     id<MTLBuffer> mesh_vertices_=nil, mesh_indices_=nil;
     id<MTLRenderPipelineState> mesh_pipeline_=nil;
     id<MTLDepthStencilState> mesh_depth_state_=nil;
     id<MTLTexture> mesh_depth_=nil;
+    id<MTLTexture> mesh_oracle_=nil;
     unsigned uploaded_meshes=0,uploaded_groups=0,uploaded_vertices=0,uploaded_triangles=0,mesh_draw_calls=0;
     unsigned geometry_readbacks=0,visual_register=0,visual_unregister=0,unsupported_visual_events=0;
     unsigned long long drawn_triangles=0;
@@ -336,14 +447,18 @@ private:
 
 int main(int argc, char **argv) {
     if (argc < 3 || argc > 5) {
-        fprintf(stderr,"Usage (from content root): orbiter-core-metal <scenario> <frames 1..10000> [--hidden-present | --mesh snapshot.ppm]\n");
+        fprintf(stderr,"Usage (from content root): orbiter-core-metal <scenario> <frames 1..10000> [--hidden-present | --mesh snapshot.ppm | --engine-camera snapshot.ppm | --engine-camera-test snapshot.ppm | --diagnostic-frozen-camera-test snapshot.ppm]\n");
         return 2;
     }
     char *end = nullptr;
     long frames = strtol(argv[2], &end, 10);
     if (!end || *end || frames < 1 || frames > 10000 ||
         (argc == 4 && std::string(argv[3]) != "--hidden-present") ||
-        (argc == 5 && (std::string(argv[3]) != "--mesh" || !argv[4][0]))) return 2;
+        (argc == 5 && ((std::string(argv[3]) != "--mesh" && std::string(argv[3]) != "--engine-camera" && std::string(argv[3]) != "--engine-camera-test" && std::string(argv[3]) != "--diagnostic-frozen-camera-test") || !argv[4][0]))) return 2;
+    bool engineCamera=argc==5 && std::string(argv[3])!="--mesh";
+    bool freezeClip=argc==5 && std::string(argv[3])=="--diagnostic-frozen-camera-test";
+    bool cameraTest=argc==5 && (std::string(argv[3])=="--engine-camera-test" || freezeClip);
+    if(cameraTest && frames<2) return 2;
     setvbuf(stdout, nullptr, _IONBF, 0);
     @autoreleasepool {
         g_pOrbiter = new Orbiter;
@@ -360,7 +475,8 @@ int main(int argc, char **argv) {
                 throw std::runtime_error("core native Create returned no CDIFramework7");
             g_pOrbiter->Cfg()->CfgDebugPrm.ShutdownMode = 0;
             g_pOrbiter->SetFastExit(false);
-            client = new CoreMetalClient(argc == 4, argc == 5 ? argv[4] : "");
+            client = new CoreMetalClient(argc == 4, argc == 5 ? argv[4] : "", engineCamera, freezeClip);
+            if(freezeClip) printf("[core-metal] DIAGNOSTIC NEGATIVE CONTROL: GPU clip frozen at frame 1; API camera still changes\n");
             attached = oapiRegisterGraphicsClient(client);
             if (!attached || !client->clbkInitialise()) throw std::runtime_error("graphics registration/init failed");
             launched = true;
@@ -368,7 +484,10 @@ int main(int argc, char **argv) {
             if (!oapiGetFocusInterface()) throw std::runtime_error("no focus vessel");
             printf("[core-metal] focus=%s scenario=%s frames=%ld\n", oapiGetFocusInterface()->GetName(), argv[1], frames);
             client->attachFocusMesh();
-            for (long i=0; i<frames; ++i) { @autoreleasepool { g_pOrbiter->SingleFrame(); } }
+            for (long i=0; i<frames; ++i) { @autoreleasepool {
+                if(cameraTest && (i==0 || i==frames/2)) client->setTestCamera(i==0 ? 1 : 2);
+                g_pOrbiter->SingleFrame();
+            } }
             client->detachFocusMesh();
             g_pOrbiter->CloseSession();
             launched = false;

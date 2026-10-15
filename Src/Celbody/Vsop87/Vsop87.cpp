@@ -4,7 +4,7 @@
 #include "Vsop87.h"
 #include <stdio.h>
 
-#define DLLCLBK extern "C" __declspec(dllexport)
+// DLLCLBK is supplied by the portable SDK platform header.
 
 using namespace std;
 
@@ -64,7 +64,11 @@ bool VSOPOBJ::ReadData (const char *name)
 	TERM3 **ppterm, *pterm;
 
 	char cbuf[256];
+#ifdef _WIN32
 	sprintf (cbuf, "Config\\%s\\Data\\Vsop87%c.dat", name, sid);
+#else
+	sprintf (cbuf, "Config/%s/Data/Vsop87%c.dat", name, sid);
+#endif
 	ifstream ifs (cbuf);
 	if (!ifs) {
 		oapiWriteLogError("VSOP87 %s: Data file not found: %s", name, cbuf);

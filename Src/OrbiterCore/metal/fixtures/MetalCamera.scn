@@ -1,0 +1,31 @@
+BEGIN_DESC
+Bounded real-engine camera fixture: DG orbiting stock Kepler Vesta.
+Requires real native Sun/VSOP87; avoids full Sol satellites. Not Smack!.
+END_DESC
+BEGIN_ENVIRONMENT
+  System MetalCamera
+  Date MJD 51982.8053808334
+END_ENVIRONMENT
+BEGIN_FOCUS
+  Ship GL-01
+END_FOCUS
+BEGIN_CAMERA
+  TARGET GL-01
+  MODE Extern
+  POS 4.0 23.0 17.0
+  TRACKMODE TargetRelative
+  FOV 40.00
+END_CAMERA
+BEGIN_SHIPS
+GL-01:DeltaGlider
+  STATUS Orbiting Vesta
+  RPOS 600000 0 0
+  RVEL 0 0 169.76
+  AROT 62.90 -0.99 -93.92
+  VROT 0 0 0
+  PRPLEVEL 0:0.553 1:0.999
+  NOSECONE 1 1.0000
+  GEAR 0 0.0000
+  AIRLOCK 0 0.0000
+END
+END_SHIPS

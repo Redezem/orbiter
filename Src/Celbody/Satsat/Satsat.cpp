@@ -21,7 +21,7 @@ static const char *satname[NSAT] = {
 };
 
 static double sample_dt[NSAT];   // sampling intervals
-static Sample sample[NSAT][2];   // interpolation samples
+static Sample ephem_samples[NSAT][2];   // interpolation samples
 static double pEphemT[NSAT];     // time of last full solution
 static double pEphemP[NSAT][6];  // last full solution
 static double pInterpT[NSAT];    // time of last interpolated solution
@@ -37,7 +37,7 @@ SATOBJ::SATOBJ (OBJHANDLE hObj, int is, double dt): CELBODY2 (hObj)
 {
 	ksat = is;                                     // body id
 	sample_dt[ksat] = dt;                          // sampling interval
-	sample[ksat][0].t = sample[ksat][1].t = -1e20; // invalidate
+	ephem_samples[ksat][0].t = ephem_samples[ksat][1].t = -1e20; // invalidate
 	pInterpT[ksat] = -1;                           // invalidate
 
 	// write some statistics to the orbiter log
@@ -151,7 +151,7 @@ void SampleEphem (int ksat, double simt, double *ret)
 	} else {
 
 		Sample *s0, *s1;
-		Sample *sp = sample[ksat];
+		Sample *sp = ephem_samples[ksat];
 		double interval = sample_dt[ksat];
 
 		if (sp[0].t < sp[1].t) s0 = sp+0, s1 = sp+1;
@@ -241,12 +241,12 @@ DLLCLBK void InitModule (HINSTANCE hModule)
 	// Load the data for the TASS 1.7 perturbation solutions
 	// into global data structures
 
-	ReadData ("Config\\Saturn\\Data\\tass17.dat", 0);
+	ReadData ("Config/Saturn/Data/tass17.dat", 0);
 
 	// invalidate all data structures
 	int i;
 	for (i = 0; i < NSAT; i++) {
 		pInterpT[i] = -1;
-		sample[i][0].t = sample[i][1].t = -1e20; // invalidate
+		ephem_samples[i][0].t = ephem_samples[i][1].t = -1e20; // invalidate
 	}
 }

@@ -12,6 +12,95 @@ if(NOT EXISTS ${ORB_LUA_SRC}/lapi.c)
 	set(ORB_LUA_SRC ${FETCHCONTENT_BASE_DIR}/lua-src)
 endif()
 
+# Real native celestial ephemerides. Keep the original VSOP series data and
+# body implementation; only platform paths/exports differ from the Windows build.
+set(ORB_CELBODY_SRC ${CMAKE_SOURCE_DIR}/Src/Celbody)
+function(orb_celbody_target name)
+	add_library(${name} SHARED ${ARGN})
+	target_include_directories(${name} PRIVATE ${CMAKE_SOURCE_DIR}/Orbitersdk/include)
+	target_link_options(${name} PRIVATE -undefined dynamic_lookup)
+	set_target_properties(${name} PROPERTIES PREFIX ""
+		BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "@loader_path/.."
+		LIBRARY_OUTPUT_DIRECTORY ${ORB_MODULE_DIR}/Celbody)
+endfunction()
+orb_celbody_target(Vsop87 ${ORB_CELBODY_SRC}/Vsop87/Vsop87.cpp)
+set_target_properties(Vsop87 PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${ORB_MODULE_DIR})
+foreach(body Sun Mercury Venus Earth Mars Jupiter Saturn Uranus Neptune)
+	orb_celbody_target(${body} ${ORB_CELBODY_SRC}/Vsop87/${body}/${body}.cpp)
+	target_include_directories(${body} PRIVATE ${ORB_CELBODY_SRC}/Vsop87)
+	target_link_libraries(${body} PRIVATE Vsop87)
+	if(body STREQUAL "Sun")
+		set(series E)
+	else()
+		set(series B)
+	endif()
+	string(TOLOWER ${body} body_lower)
+	string(SUBSTRING ${body_lower} 0 3 body_lower)
+	set(vsop_source "${ORB_CELBODY_SRC}/Vsop87/Data/Vsop87${series}_${body_lower}.dat")
+	set(vsop_output "${CMAKE_BINARY_DIR}/Config/${body}/Data/Vsop87${series}.dat")
+	# Coefficients are independent build inputs, not a side effect of linking.
+	# Recopy changed inputs and reconstruct deleted outputs without relinking.
+	add_custom_command(OUTPUT "${vsop_output}"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/Config/${body}/Data"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${vsop_source}" "${vsop_output}"
+		DEPENDS "${vsop_source}"
+		VERBATIM)
+	add_custom_target(${body}-vsop-data DEPENDS "${vsop_output}")
+	add_dependencies(${body} ${body}-vsop-data)
+endforeach()
+orb_celbody_target(Moon ${ORB_CELBODY_SRC}/Moon/Moon.cpp ${ORB_CELBODY_SRC}/Moon/ELP82.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/celbody_dependency_init.cpp)
+target_compile_definitions(Moon PRIVATE ORB_EPHEMERIS_HAS_EXIT)
+foreach(family Galsat Satsat)
+	if(family STREQUAL "Galsat")
+		set(driver Lieske)
+		set(satellites Io Europa Ganymede Callisto)
+	else()
+		set(driver Tass17)
+		set(satellites Mimas Enceladus Tethys Dione Rhea Titan Hyperion Iapetus)
+	endif()
+	orb_celbody_target(${family} ${ORB_CELBODY_SRC}/${family}/${family}.cpp ${ORB_CELBODY_SRC}/${family}/${driver}.cpp
+		${CMAKE_CURRENT_SOURCE_DIR}/celbody_dependency_init.cpp)
+	set_target_properties(${family} PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${ORB_MODULE_DIR})
+	foreach(body ${satellites})
+		orb_celbody_target(${body} ${ORB_CELBODY_SRC}/${family}/${body}/${body}.cpp)
+		target_include_directories(${body} PRIVATE ${ORB_CELBODY_SRC}/${family})
+		target_link_libraries(${body} PRIVATE ${family})
+	endforeach()
+endforeach()
+target_link_libraries(Jupiter PRIVATE Galsat)
+target_link_libraries(Saturn PRIVATE Satsat)
+add_custom_target(native-ephemerides DEPENDS Sun Mercury Venus Earth Mars Jupiter Saturn Uranus Neptune Moon
+	Galsat Satsat Io Europa Ganymede Callisto Mimas Enceladus Tethys Dione Rhea Titan Hyperion Iapetus)
+
+# Explicit staging target: never replace stock config files with test data.
+set(ORB_NATIVE_CONTENT_DIR "${CMAKE_SOURCE_DIR}/out/stage/content" CACHE PATH "Native runtime content root")
+add_custom_target(stage-native-ephemerides DEPENDS native-ephemerides)
+foreach(body Sun Mercury Venus Earth Mars Jupiter Saturn Uranus Neptune Moon Io Europa Ganymede Callisto
+	Mimas Enceladus Tethys Dione Rhea Titan Hyperion Iapetus Vsop87 Galsat Satsat)
+	if(body MATCHES "^(Vsop87|Galsat|Satsat)$")
+		set(dest Modules)
+	else()
+		set(dest Modules/Celbody)
+	endif()
+	add_custom_command(TARGET stage-native-ephemerides POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E make_directory ${ORB_NATIVE_CONTENT_DIR}/${dest}
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${body}> ${ORB_NATIVE_CONTENT_DIR}/${dest}/)
+endforeach()
+foreach(body Sun Mercury Venus Earth Mars Jupiter Saturn Uranus Neptune)
+	add_custom_command(TARGET stage-native-ephemerides POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/Config/${body}/Data ${ORB_NATIVE_CONTENT_DIR}/Config/${body}/Data)
+endforeach()
+foreach(spec "Moon:Moon/ELP82.dat:ELP82.dat" "Jupiter:Galsat/ephem_e15.dat:ephem_e15.dat" "Saturn:Satsat/tass17.dat:tass17.dat")
+	string(REPLACE ":" ";" parts ${spec})
+	list(GET parts 0 body)
+	list(GET parts 1 source)
+	list(GET parts 2 filename)
+	add_custom_command(TARGET stage-native-ephemerides POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E make_directory ${ORB_NATIVE_CONTENT_DIR}/Config/${body}/Data
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ORB_CELBODY_SRC}/${source} ${ORB_NATIVE_CONTENT_DIR}/Config/${body}/Data/${filename})
+endforeach()
+
 # Lua interpreter library (Quadcopter's Lua interface links it).
 # Glob like Extern/Lua does — this vendored Lua is 5.1 (no lctype/lbitlib).
 file(GLOB ORB_LUA_C "${ORB_LUA_SRC}/*.c")
