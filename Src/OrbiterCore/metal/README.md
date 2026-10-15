@@ -334,8 +334,8 @@ exact GPU completion/readback counts are required. The negative
 `--buffered-input-ignore-test` publishes identical held keys but deliberately
 suppresses buffered events: it must stay running and fail the pause oracle with a
 nonzero exit **after normal teardown**. No `oapiSetPause`, direct engine SendKbd,
-visible window, focus activation or OS injection is used. SDL-to-ImGui platform
-input is still missing: this is not a full keyboard/UI or interactive-app claim.
+visible window, focus activation or OS injection is used. This legacy mode does
+not enable the separate SDL-to-ImGui platform mode below; it is not an interactive-app claim.
 
 ## Bounded native SDL held-key session bridge
 
@@ -413,11 +413,72 @@ tests also poll the actual DI shim device and exercise modifiers, repeats,
 window isolation and all clear/quit paths without initialising SDL video.
 
 This implements held-key immediate controls and the bounded buffered keyboard
-path below, not SDL-to-ImGui platform input, mouse/cockpit interaction,
+path, not the separately opted-in SDL-to-ImGui platform input below, cockpit interaction,
 menu/key-command completeness, joystick/gamepad,
 full HUD/MFD/Sketchpad, terrain, animation, alpha blending or general interactive
 app readiness. Existing clear/mesh/camera/material/texture modes do not pump
 session input unless explicitly opted in; their regressions remain separate.
+
+## Engine-owned ImGui SDL3 platform input (hidden, event-only)
+
+Append `--platform-input` to an existing bounded mode to initialize
+`ImGui_ImplSDL3_InitForMetal` in `clbkImGuiInit`, after the hidden SDL window and
+DialogManager's sole context exist. `imgui_platform.cpp` compiles the exact same
+`${ORB_IMGUI_SRC}` backend as the engine's ImGui fork, not another ImGui library.
+The SDL pump forwards every event to both platform UI and physical DIK paths;
+backend return values/capture never swallow key-up. The unchanged engine
+`UserInput` gates immediate and buffered controls using `io.WantCaptureKeyboard`.
+SDL platform NewFrame precedes DialogManager's own NewFrame; shutdown is in the
+engine callback before context/window destruction, with owner/lifetime assertions.
+The existing inert Win32 shim remains inert, and all old modes remain opt-in
+independent with their original routing.
+
+This mode deliberately supports **process-local events only**, not OS IME or a
+usable interactive app. Viewports, gamepad polling, clipboard access, shell/IME
+callbacks, cursor change/warp and global mouse-state polling/capture are disabled.
+SDL's current backend exposes no public global-mouse capability switch, so a
+small, explicitly version-coupled adapter accesses its private capability fields
+in the same translation unit; backend upgrades must compile and rerun its tests.
+SDL still reads process/window focus, size, timing and display metadata, and pumps
+its normal event queue. `SDL_HINT_VIDEO_ALLOW_SCREENSAVER=1` is set before video
+initialization; the test verifies screensaver remains enabled. No OS input
+injection, show/raise/activation or focus-changing API is used. Hidden/no-input-
+focus flags are checked every frame, including hidden drawable runs.
+
+```sh
+cmake --build out/build/macos-core-spike --target \
+  orbiter-core-metal orbiter-imgui-platform-tests -j6
+out/build/macos-core-spike/Src/OrbiterCore/metal/orbiter-imgui-platform-tests
+python3 Src/OrbiterCore/metal/imgui_input_regression.py \
+  out/build/macos-core-spike/Src/OrbiterCore/metal/orbiter-core-metal \
+  out/stage/content /Users/redezem/.hermes/cache/scratch/orbiter-imgui-input
+# Optional: append --hidden-present (no visible scanout claim).
+```
+
+The explicit diagnostic `--imgui-input-test` installs an EndFramePre context hook
+which draws a real `ImGui::InputText` inside the engine-owned frame, not a second
+context or a fake widget. After untouched startup warmup, actual SDL text `orbit`,
+Backspace down/up and text `t` produce `orbit -> orbi -> orbit`. Focus acquisition
+is given a whole frame before text is sent. Real Ctrl/keypad-plus raises actual
+VESSEL main throttle before UI capture; while the text widget captures, held
+Ctrl/keypad-plus/P remain published physically but the real engine polled control
+state is zero, throttle remains unchanged and buffered Ctrl+P does not pause.
+Focus loss clears both consumers without swallowing releases. After widget
+removal and bounded natural capture settling (no forced WantCapture override),
+Ctrl/keypad-minus decreases actual throttle and Ctrl+P pauses/resumes at the
+engine's deferred BeginTimeStep boundary. No throttle/pause setters are used.
+The requested 26-frame bound quits after 22 actual frames and tears down normally.
+
+The runner repeats three positive lifecycles and a diagnostic
+`--imgui-input-ignore-test` negative which keeps the platform backend, real widget,
+held/buffered flight route and capture logic, but does not forward SDL events to
+ImGui. The same text/edit oracle must reject its empty widget with a nonzero
+process exit after normal teardown; callback counters cannot satisfy it.
+The separate backend test covers UTF-8, key/mouse/button/wheel delivery, foreign
+window isolation, key-up, focus/hide/minimize/close clearing and lifetime ordering.
+That standalone test executable owns its own test context, never a second context
+inside the engine process. GPU/readback and hidden-window lifecycle checks remain
+required. This does not claim complete cockpit/HUD/MFD or interactive-app readiness.
 
 ## Review dispositions
 

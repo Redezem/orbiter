@@ -32,6 +32,9 @@
 #include "session_input.h"
 #include "session_control_probe.h"
 #include "buffered_control_probe.h"
+#include "imgui_platform.h"
+#include "backends/imgui_impl_sdl3.h"
+#include "imgui_input_probe.h"
 
 extern Orbiter *g_pOrbiter;
 
@@ -218,9 +221,14 @@ public:
         return 0; // Template snapshot only: never claim animation or instance mutation support.
     }
     ~CoreMetalClient() override { release(); }
+    bool platformInput=false;
     SDL_WindowID windowID() const { return SDL_GetWindowID(window_); }
     bool clbkInitialise() override {
         SDL_SetHint(SDL_HINT_MAC_BACKGROUND_APP, "1");
+        if(platformInput) {
+            SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER,"1");
+            SDL_SetHint(SDL_HINT_MOUSE_AUTO_CAPTURE,"0");
+        }
         if (!SDL_Init(SDL_INIT_VIDEO)) return fail(SDL_GetError());
         sdl_ = true;
         window_ = SDL_CreateWindow("Orbiter core Metal probe", width, height,
@@ -264,15 +272,28 @@ public:
     void clbkImGuiInit() override {
         ++imgui_init;
         auto &io = ImGui::GetIO();
-        // No platform windows/input in this bounded, hidden probe. The engine owns contexts.
+        // Engine owns the only context; platform input is explicitly opt-in.
         io.ConfigFlags &= ~ImGuiConfigFlags_ViewportsEnable;
         io.IniFilename = nullptr;
         io.DisplaySize = ImVec2(width, height);
         if (!ImGui_ImplMetal_Init(device_)) throw std::runtime_error("ImGui Metal init failed");
         imgui_ready_ = true;
+        if(platformInput) {
+            if(!core_metal::initImGuiPlatform(window_)) throw std::runtime_error("SDL ImGui platform init failed");
+            platform_ready_=true;
+            platform_context_=ImGui::GetCurrentContext();
+            printf("[core-metal] platform_init context=%p window=%u event_only=1 global_mouse_poll=0 cursor_change=0 os_ime=0 clipboard=disabled screensaver_enabled=%u\n",platform_context_,windowID(),SDL_ScreenSaverEnabled());
+        }
     }
     void clbkImGuiShutdown() override {
         ++imgui_shutdown;
+        if(platform_ready_) {
+            check(ImGui::GetCurrentContext()==platform_context_ && window_ && SDL_GetWindowFromID(windowID())==window_,"platform shutdown owner/window invalid");
+            ImGui_ImplSDL3_Shutdown();
+            check(!ImGui::GetIO().BackendPlatformUserData,"platform shutdown failed");
+            printf("[core-metal] platform_shutdown context_alive=1 window_alive=1 backend_cleared=1\n");
+        }
+        platform_ready_=false;
         if (imgui_ready_) ImGui_ImplMetal_Shutdown();
         imgui_ready_ = false;
     }
@@ -280,8 +301,15 @@ public:
         ++newframes;
         check(updates == renders + 1 && newframes == updates, "update/newframe order");
         auto &io = ImGui::GetIO();
+        if(platform_ready_) {
+            check(ImGui::GetCurrentContext()==platform_context_,"platform context owner changed");
+            ImGui_ImplSDL3_NewFrame();
+        }
+        // This renderer intentionally fixes its Metal target/drawable to 640x480,
+        // even on Retina displays. SDL's OS backing scale is not our target scale.
         io.DisplaySize = ImVec2(width, height);
-        io.DeltaTime = 1.0f / 60.0f;
+        if(platform_ready_) io.DisplayFramebufferScale=ImVec2(1,1);
+        else io.DeltaTime = 1.0f / 60.0f; // preserve legacy diagnostic timing
         // Backend preparation only: DialogManager calls ImGui::NewFrame itself.
         auto pass = [MTLRenderPassDescriptor renderPassDescriptor];
         pass.colorAttachments[0].texture = target_;
@@ -583,6 +611,8 @@ private:
         sdl_ = false;
     }
     bool present_, engine_camera_=false, freeze_clip_=false, materials_=false, sdl_ = false, imgui_ready_ = false;
+    ImGuiContext *platform_context_=nullptr;
+    bool platform_ready_=false;
     bool textures_=false,ignore_sampling_=false;
     struct TextureRange { size_t first,count; void *handle; };
     std::vector<TextureRange> texture_ranges_;
@@ -624,9 +654,14 @@ private:
 int main(int argc, char **argv) {
     // Independent trailing session/presentation options leave old positional modes intact.
     bool session=false, sessionTest=false, ignoreInput=false, present=false, bufferedTest=false, ignoreBuffer=false;
+    bool platformInput=false,imguiTest=false,ignoreForward=false;
     while(argc>3) {
         std::string option=argv[argc-1];
         if(option=="--hidden-present") { if(present) return 2; present=true; --argc; }
+        else if(option=="--platform-input" || option=="--imgui-input-test" || option=="--imgui-input-ignore-test") {
+            if(session) return 2;
+            session=true; platformInput=true; imguiTest=option!="--platform-input"; ignoreForward=option=="--imgui-input-ignore-test"; --argc;
+        }
         else if(option=="--buffered-input-test" || option=="--buffered-input-ignore-test") {
             if(session) return 2;
             session=true; bufferedTest=true; ignoreBuffer=option=="--buffered-input-ignore-test"; --argc;
@@ -637,7 +672,7 @@ int main(int argc, char **argv) {
         } else break;
     }
     if (argc < 3 || argc > 6) {
-        fprintf(stderr,"Usage (from content root): orbiter-core-metal <scenario> <frames 1..10000> [--mesh snapshot.ppm | --engine-camera snapshot.ppm | --engine-camera-test snapshot.ppm | --diagnostic-frozen-camera-test snapshot.ppm | --materials snapshot.ppm | --materials-test snapshot.ppm | --materials-reference-test snapshot.ppm | --textures snapshot.ppm | --textures-test snapshot.ppm | --textures-ignore-sampling-test snapshot.ppm] [--hidden-present] [--session-input | --session-input-test | --session-input-ignore-test]\nSession test modes require a bound of at least 16 frames; all windows remain hidden.\n");
+        fprintf(stderr,"Usage (from content root): orbiter-core-metal <scenario> <frames 1..10000> [--mesh snapshot.ppm | --engine-camera snapshot.ppm | --engine-camera-test snapshot.ppm | --diagnostic-frozen-camera-test snapshot.ppm | --materials snapshot.ppm | --materials-test snapshot.ppm | --materials-reference-test snapshot.ppm | --textures snapshot.ppm | --textures-test snapshot.ppm | --textures-ignore-sampling-test snapshot.ppm] [--hidden-present] [--platform-input | --imgui-input-test | --imgui-input-ignore-test | --buffered-input-test | --buffered-input-ignore-test | --session-input | --session-input-test | --session-input-ignore-test]\nSession test modes require a bound of at least 16 frames; all windows remain hidden.\n");
         return 2;
     }
     char *end = nullptr;
@@ -655,6 +690,7 @@ int main(int argc, char **argv) {
     if(cameraTest && frames<2) return 2;
     if(sessionTest && frames<16) return 2;
     if(bufferedTest && frames<19) return 2;
+    if(imguiTest && frames<22) return 2;
     setvbuf(stdout, nullptr, _IONBF, 0);
     @autoreleasepool {
         g_pOrbiter = new Orbiter;
@@ -663,6 +699,7 @@ int main(int argc, char **argv) {
         std::unique_ptr<core_metal::SessionInput> input;
         std::unique_ptr<core_metal::SessionControlProbe> controlProbe;
         std::unique_ptr<core_metal::BufferedControlProbe> bufferedProbe;
+        std::unique_ptr<core_metal::ImGuiInputProbe> imguiProbe;
         int result = 1;
         try {
             std::string cmd = "--scenariox=\"" + std::string(argv[1]) + "\"";
@@ -675,6 +712,7 @@ int main(int argc, char **argv) {
             g_pOrbiter->Cfg()->CfgDebugPrm.ShutdownMode = 0;
             g_pOrbiter->SetFastExit(false);
             client = new CoreMetalClient(present, modeArgc == 5 ? argv[4] : "", engineCamera, freezeClip, materials, textures, textures && std::string(argv[3])=="--textures-ignore-sampling-test");
+            client->platformInput=platformInput;
             if(freezeClip) printf("[core-metal] DIAGNOSTIC NEGATIVE CONTROL: GPU clip frozen at frame 1; API camera still changes\n");
             attached = oapiRegisterGraphicsClient(client);
             if (!attached || !client->clbkInitialise()) throw std::runtime_error("graphics registration/init failed");
@@ -685,8 +723,9 @@ int main(int argc, char **argv) {
             client->attachFocusMesh();
             if(session) {
                 if(!g_pOrbiter->GetDInput()->GetKbdDevice()) throw std::runtime_error("native session has no actual keyboard device");
-                input=std::make_unique<core_metal::SessionInput>(client->windowID(),ignoreInput ? +[](unsigned,bool){} : (ignoreBuffer ? shim_set_key_state_only : shim_set_key));
+                input=std::make_unique<core_metal::SessionInput>(client->windowID(),ignoreInput ? +[](unsigned,bool){} : (ignoreBuffer ? shim_set_key_state_only : shim_set_key),platformInput && !ignoreForward ? core_metal::processImGuiEvent : nullptr);
                 input->pump(); // drain startup window notifications before the test schedule
+                if(imguiTest) imguiProbe=std::make_unique<core_metal::ImGuiInputProbe>(client->windowID());
                 if(bufferedTest) bufferedProbe=std::make_unique<core_metal::BufferedControlProbe>(client->windowID());
                 if(sessionTest) controlProbe=std::make_unique<core_metal::SessionControlProbe>(client->windowID());
                 printf("[core-metal] session input=held-DIK hidden=1 buffered_commands=bounded-transitions bridge_publication=%u buffered_publication=%u\n",!ignoreInput,!ignoreBuffer);
@@ -695,16 +734,26 @@ int main(int argc, char **argv) {
             for (long i=0; i<frames; ++i) { @autoreleasepool {
                 if(controlProbe) controlProbe->before(static_cast<unsigned>(i));
                 if(bufferedProbe) bufferedProbe->before(static_cast<unsigned>(i));
+                if(imguiProbe) imguiProbe->before(static_cast<unsigned>(i));
                 if(input) input->pump();
                 if(cameraTest && (i==0 || i==frames/2)) client->setTestCamera(i==0 ? 1 : 2,materialViews);
+                if(imguiProbe) imguiProbe->beforeEngine();
                 g_pOrbiter->SingleFrame();
                 ++executed;
                 if(controlProbe) controlProbe->after(static_cast<unsigned>(i),g_pOrbiter->KeyState());
                 if(bufferedProbe) bufferedProbe->after(static_cast<unsigned>(i),g_pOrbiter->KeyState());
+                if(imguiProbe) imguiProbe->after(static_cast<unsigned>(i),g_pOrbiter->KeyState());
                 if(input && input->quitRequested()) break;
             } }
-            bool controlsOK=(!controlProbe || controlProbe->verified()) && (!bufferedProbe || bufferedProbe->verified());
+            bool controlsOK=(!controlProbe || controlProbe->verified()) && (!bufferedProbe || bufferedProbe->verified()) && (!imguiProbe || imguiProbe->verified());
+            imguiProbe.reset();
             input.reset(); // all held keys released before core/device/world teardown
+            if(platformInput) {
+                unsigned char released[256]{};
+                if(FAILED(g_pOrbiter->GetDInput()->GetKbdDevice()->GetDeviceState(sizeof(released),released))) throw std::runtime_error("platform teardown device poll failed");
+                for(auto key:released) if(key) throw std::runtime_error("platform teardown left a held key");
+                printf("[core-metal] platform_session_destroyed actual_device_keys=all-released\n");
+            }
             client->detachFocusMesh();
             g_pOrbiter->CloseSession();
             launched = false;
@@ -712,6 +761,7 @@ int main(int argc, char **argv) {
         } catch (const std::exception &e) {
             fprintf(stderr,"[core-metal] FAIL: %s\n", e.what());
         }
+        imguiProbe.reset();
         input.reset();
         if (launched) { if(client) client->detachFocusMesh(); g_pOrbiter->CloseSession(); }
         if (client) client->report();

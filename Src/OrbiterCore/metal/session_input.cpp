@@ -63,6 +63,9 @@ void SessionInput::handle(const SDL_Event &e) {
 
 void SessionInput::pump() {
     SDL_Event event;
-    while (SDL_PollEvent(&event)) handle(event);
+    while (SDL_PollEvent(&event)) {
+        if (forward_ && !quit_) forward_(event); // never consume releases based on capture
+        handle(event);
+    }
 }
 }

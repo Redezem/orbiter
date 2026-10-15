@@ -11,7 +11,8 @@ unsigned directInputScancode(SDL_Scancode code);
 class SessionInput {
 public:
     using Publish = void (*)(unsigned, bool);
-    SessionInput(SDL_WindowID window, Publish publish) : window_(window), publish_(publish) { clear(); }
+    using Forward = void (*)(const SDL_Event&);
+    SessionInput(SDL_WindowID window, Publish publish, Forward forward=nullptr) : window_(window), publish_(publish), forward_(forward) { clear(); }
     ~SessionInput() { clear(); }
     SessionInput(const SessionInput&) = delete;
     SessionInput& operator=(const SessionInput&) = delete;
@@ -23,6 +24,7 @@ public:
 private:
     SDL_WindowID window_;
     Publish publish_;
+    Forward forward_;
     std::array<bool, 256> keys_{};
     bool quit_ = false;
 };
