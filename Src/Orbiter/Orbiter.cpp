@@ -395,6 +395,11 @@ HRESULT Orbiter::Create (HINSTANCE hInstance)
 	{
 		pConfig->Load(MasterConfigFile);
 		strcpy (cfgpath, pConfig->CfgDirPrm.ConfigDir);   cfglen = strlen (cfgpath);
+		// Graphics-enabled Launch creates devices even without the Win32 shell.
+		// Initialise their owner here, matching the regular Create lifecycle.
+		hInst = hInstance;
+		HRESULT input_hr = pDI->Create(hInstance);
+		if (FAILED(input_hr)) return input_hr;
 		if (!keymap.Read ("keymap.cfg")) keymap.Write ("keymap.cfg");
 		pState = new State(); TRACENEW
 		if (pConfig->CfgCmdlinePrm.bFastExit)

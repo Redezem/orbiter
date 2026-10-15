@@ -211,3 +211,9 @@ target_link_options(orbiter-core-smoke PRIVATE
 # Native vessel modules (real Src/Vessel sources built as .dylib against the
 # engine host's exported symbols)
 add_subdirectory(modules)
+
+# Opt-in native Metal callback/lifecycle probe, independent of the bootstrap app.
+option(ORBITER_BUILD_CORE_METAL "Build the real-core hidden Metal lifecycle probe" OFF)
+if(APPLE AND ORBITER_BUILD_CORE_METAL)
+	add_subdirectory(metal)
+endif()

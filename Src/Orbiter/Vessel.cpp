@@ -2252,13 +2252,16 @@ oapi::ParticleStream *Vessel::AddParticleStream (PARTICLESTREAMSPEC *pss, const 
 	oapi::GraphicsClient *gc = g_pOrbiter->GetGraphicsClient ();
 	if (!gc) return 0;
 
+	oapi::ParticleStream *stream = gc->clbkCreateExhaustStream (pss, (OBJHANDLE)this, lvl, MakeVECTOR3(pos), MakeVECTOR3(-dir));
+	if (!stream) return 0;
+
 	oapi::ParticleStream **tmp = new oapi::ParticleStream*[ncontrail+1]; TRACENEW
 	if (ncontrail) {
 		memcpy (tmp, contrail, ncontrail*sizeof(oapi::ParticleStream*));
 		delete []contrail;
 	}
 	contrail = tmp;
-	contrail[ncontrail] = gc->clbkCreateExhaustStream (pss, (OBJHANDLE)this, lvl, MakeVECTOR3(pos), MakeVECTOR3(-dir));
+	contrail[ncontrail] = stream;
 	return contrail[ncontrail++];	
 }
 
@@ -2270,13 +2273,17 @@ oapi::ParticleStream *Vessel::AddExhaustStream (ThrustSpec *ts, PARTICLESTREAMSP
 	oapi::GraphicsClient *gc = g_pOrbiter->GetGraphicsClient ();
 	if (!gc) return 0;
 
+	// A client can decline unsupported streams. Do not configure or register null.
+	oapi::ParticleStream *stream = gc->clbkCreateExhaustStream (pss, (OBJHANDLE)this, &ts->level, &ts->ref, &ts->dir);
+	if (!stream) return 0;
+
 	oapi::ParticleStream **tmp = new oapi::ParticleStream*[ncontrail+1]; TRACENEW
 	if (ncontrail) {
 		memcpy (tmp, contrail, ncontrail*sizeof(oapi::ParticleStream*));
 		delete []contrail;
 	}
 	contrail = tmp;
-	contrail[ncontrail] = gc->clbkCreateExhaustStream (pss, (OBJHANDLE)this, &ts->level, &ts->ref, &ts->dir);
+	contrail[ncontrail] = stream;
 	if (pos) // local position reference
 		contrail[ncontrail]->SetFixedPos (MakeVECTOR3(*pos));
 	if (dir) // local direction reference
@@ -2326,13 +2333,16 @@ oapi::ParticleStream *Vessel::AddReentryStream (PARTICLESTREAMSPEC *pss)
 	oapi::GraphicsClient *gc = g_pOrbiter->GetGraphicsClient ();
 	if (!gc) return 0;
 
+	oapi::ParticleStream *stream = gc->clbkCreateReentryStream (pss, (OBJHANDLE)this);
+	if (!stream) return 0;
+
 	oapi::ParticleStream **tmp = new oapi::ParticleStream*[nreentrystream+1]; TRACENEW
 	if (nreentrystream) {
 		memcpy (tmp, reentrystream, nreentrystream*sizeof(oapi::ParticleStream*));
 		delete []reentrystream;
 	}
 	reentrystream = tmp;
-	reentrystream[nreentrystream] = gc->clbkCreateReentryStream (pss, (OBJHANDLE)this);
+	reentrystream[nreentrystream] = stream;
 	return reentrystream[nreentrystream++];
 }
 
