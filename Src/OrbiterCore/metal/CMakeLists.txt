@@ -41,6 +41,9 @@ target_include_directories(orbiter-buffered-input-tests PRIVATE ../shim ${CMAKE_
 target_link_libraries(orbiter-buffered-input-tests PRIVATE SDL3::SDL3)
 target_link_options(orbiter-buffered-input-tests PRIVATE -Wl,-rpath,$<TARGET_FILE_DIR:SDL3::SDL3>)
 
+add_executable(orbiter-planet-mesh-tests test_planet_mesh.cpp)
+target_compile_features(orbiter-planet-mesh-tests PRIVATE cxx_std_17)
+
 # Adapter tests exercise the real DI shim but never initialise video or a window.
 add_executable(orbiter-session-input-tests test_session_input.cpp session_input.cpp ../shim/shim_input.cpp)
 target_compile_features(orbiter-session-input-tests PRIVATE cxx_std_17)

@@ -14,8 +14,9 @@ def stage(content, output, prefix='content-'):
     for folder, filename in [('Config', 'MetalCamera.cfg'), ('Scenarios', 'MetalCamera.scn')]:
         directory = launch / folder
         directory.mkdir()
-        with (directory / filename).open('xb') as target:
-            target.write((fixtures / filename).read_bytes())
+        for name in (filename, filename.replace('MetalCamera', 'MetalEarth')):
+            with (directory / name).open('xb') as target:
+                target.write((fixtures / name).read_bytes())
     for source in content.iterdir():
         destination = launch / source.name
         if os.path.lexists(destination):

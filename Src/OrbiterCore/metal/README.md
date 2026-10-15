@@ -628,6 +628,70 @@ The C++ gear composition checks establish internal consistency, not an independe
 matrix multiplication oracle; the separate Python scalar quaternion/source and
 GPU pixel oracle remains the independent mathematical check.
 
+## Opt-in actual-engine Earth surface globe
+
+This is a fixed-resolution **unlit, opaque h=0 sphere**, not elevation terrain,
+flight scenery, atmospheric/cloud/night/water/lighting rendering, or a full-Sol
+scientific validation. It is separate from Bootstrap/Runtime. Existing vessel
+modes retain their original geometry, shader and 0.1..1,000,000 m depth policy.
+
+```sh
+cmake --build out/build/macos-core-spike \
+  --target orbiter-core-metal stage-native-ephemerides orbiter-planet-mesh-tests -j6
+out/build/macos-core-spike/Src/OrbiterCore/metal/orbiter-planet-mesh-tests
+python3 -m unittest discover -s Src/OrbiterCore/metal -p 'test_*regression.py'
+python3 -m unittest discover -s Src/OrbiterCore/metal -p 'test_fixture_staging.py'
+python3 Src/OrbiterCore/metal/planet_regression.py \
+  out/build/macos-core-spike/Src/OrbiterCore/metal/orbiter-core-metal \
+  out/stage/content /Users/redezem/.hermes/cache/scratch/orbiter-earth-globe-acceptance
+```
+
+`--planet-surface /absolute/image.ppm` preserves the scenario camera;
+`--planet-surface-test /absolute/image.ppm` sets the actual engine Earth-relative
+camera to 3 live body radii, FOV 40 degrees, then changes orbital angles halfway.
+Both remain hidden/offscreen; hidden presentation and session/gear controls are
+intentionally not combined with this bounded planet mode. All planet-mode scene
+geometry shares near=1000 m, far=50,000,000 m and one Depth32Float attachment.
+
+`PlanetSurface` owns two persistent RGBA8Unorm mip0 textures, mesh buffers and
+pipeline. It resolves the live Earth name and configured `PlanetTexturePath`,
+then calls the already-linked core `ZTreeMgr` for exactly (4,0,0) and (4,0,1).
+The committed DDS decoder uploads the installed 512x512 roots. The existing core
+reader is a **trusted-content reader**, not newly hardened for hostile archives;
+root index/payload bounds and RAII release are enforced at the caller. Each
+hemisphere uses 64x64 cells with duplicated seams, longitude west [-pi,0] / east
+[0,pi], V north-to-south, and explicit nearest/clamp sampling. Radius comes from
+`oapiGetSize`, rotation/global position from actual body APIs. Camera/body global
+positions are subtracted in double before float conversion. Radius-scale float
+positions are acceptable for this orbital slice, not sub-metre touchdown claims.
+Planet resources and engine handle are retired before world close.
+
+The shared staging helper reserves real MetalEarth config/scenario files before
+source links (including filesystem case aliases). It does not overwrite Sol,
+Earth.cfg, source scenarios or archives. The runner records native Sun/Earth/
+VSOP87 module/data hashes and requires positive Sun/Earth theory initialization
+term counts. Missing optional atmosphere/LuaInline/Psapi modules remain observable;
+this unlit surface does not claim their support or scientific ephemeris accuracy.
+
+The Python oracle independently inflates both real archive roots and decodes with
+Pillow, uses actual API pose doubles for an analytic ray/sphere silhouette (2px
+limb tolerance), and separately generates/rasterizes the specified mesh with
+perspective-correct UVs. Frontmost depth, triangle/UV/texel-boundary exclusions
+are geometric only, selected before reading GPU colors. Actual pre-UI GPU PPMs,
+raw logs and per-sample predictions are retained. Three scenario lifecycles and
+three controlled two-view lifecycles each complete 12 frames. Controlled images
+have 870/884 nonboundary samples (998 west / 756 east over the two views), zero
+channel error, and 165248 changed pixels; the threshold is >10000. These are
+actual GPU measurements, not CPU-generated acceptance images.
+
+The same positive oracle rejects `--diagnostic-freeze-planet-transform` while
+actual API camera changes, `--diagnostic-ignore-planet-sampling`, and
+`--diagnostic-swap-planet-hemispheres`, each as a nonzero standalone oracle
+process. Renderer processes still return zero after normal world/ImGui teardown.
+Vessel rendering remains present with the common depth policy, but **measurable
+vessel/planet occlusion is not established** by this distant fixture. Streaming,
+LOD, elevation, low flight precision and general body support remain future work.
+
 ## Review dispositions
 
 Independent review requested staging safety and UI-isolated camera image checks;

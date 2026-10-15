@@ -8,7 +8,8 @@ import tempfile
 import unittest
 
 HERE = Path(__file__).resolve().parent
-RUNNERS = ('camera', 'material', 'texture', 'session', 'buffered', 'imgui_input')
+RUNNERS = ('camera', 'material', 'texture', 'session', 'buffered', 'imgui_input',
+           'animation_contract', 'gear_animation', 'gear_cleanup', 'planet')
 
 
 class FixtureStaging(unittest.TestCase):
@@ -40,7 +41,8 @@ class FixtureStaging(unittest.TestCase):
             launches = [p for p in output.iterdir() if p.is_dir() and not p.is_symlink()]
             self.assertEqual(len(launches), 1, result.stderr)
             launch = launches[0]
-            for folder, name in [('Config', 'MetalCamera.cfg'), ('Scenarios', 'MetalCamera.scn')]:
+            for folder, name in [('Config', 'MetalCamera.cfg'), ('Scenarios', 'MetalCamera.scn'),
+                                 ('Config', 'MetalEarth.cfg'), ('Scenarios', 'MetalEarth.scn')]:
                 self.assertFalse((launch/folder).is_symlink())
                 staged = launch/folder/name
                 self.assertFalse(staged.is_symlink())
@@ -75,6 +77,29 @@ class FixtureStaging(unittest.TestCase):
         for runner in RUNNERS:
             with self.subTest(runner=runner):
                 self.check_stage(runner)
+
+    def test_earth_fixture_aliases_and_source_sentinels(self):
+        for runner in RUNNERS:
+            for name in ('MetalEarth.cfg', 'metalearth.cfg', 'METALEARTH.CFG'):
+                with self.subTest(runner=runner, name=name):
+                    self.check_stage(runner, fixture=name)
+
+    def test_earth_symlink_and_dangling_source_aliases(self):
+        from fixture_staging import stage
+        with tempfile.TemporaryDirectory(dir=Path.home()/'.hermes/cache/scratch') as tmp:
+            root = Path(tmp)
+            source, output = root/'source', root/'output'
+            (source/'Config').mkdir(parents=True)
+            (source/'Scenarios').mkdir()
+            output.mkdir()
+            sentinel = root/'sentinel'; sentinel.write_bytes(b'EXTERNAL-SENTINEL')
+            (source/'Config'/'metalearth.cfg').symlink_to(sentinel)
+            (source/'Scenarios'/'metalearth.scn').symlink_to(root/'absent')
+            launch = stage(source, output)
+            self.assertEqual(sentinel.read_bytes(), b'EXTERNAL-SENTINEL')
+            for folder, name in (('Config', 'MetalEarth.cfg'), ('Scenarios', 'MetalEarth.scn')):
+                self.assertFalse((launch/folder/name).is_symlink())
+                self.assertEqual((launch/folder/name).read_bytes(), (HERE/'fixtures'/name).read_bytes())
 
     def test_case_variant_reserved_fixture(self):
         with tempfile.TemporaryDirectory(dir=Path.home()/'.hermes/cache/scratch') as tmp:

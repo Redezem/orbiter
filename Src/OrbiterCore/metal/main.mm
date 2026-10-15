@@ -37,6 +37,7 @@
 #include "imgui_input_probe.h"
 #include "animation_contract_probe.h"
 #include "gear_visual.h"
+#include "planet_surface.h"
 
 extern Orbiter *g_pOrbiter;
 
@@ -47,11 +48,12 @@ public:
     void setTestCamera(unsigned view, bool materialViews=false) {
         check(engine_camera_ && (view == 1 || view == 2), "invalid controlled camera");
         CameraMode_Track mode;
-        mode.SetTarget(visual_object_);
+        mode.SetTarget(planet_ ? planet_->body() : visual_object_);
         mode.SetTrackMode(CameraMode_Track::TM_RELATIVE);
         // Material views look down onto actual canopy materials rather than the
         // original camera regression's all-white underside. Original views unchanged.
-        mode.SetPosition(textures_ ? 2.8 : 4.0, materialViews ? (view == 1 ? 2.74 : 2.04) : (view == 1 ? 0.4 : 1.1), materialViews ? (view == 1 ? -0.6 : -0.8) : (view == 1 ? 0.3 : 0.5));
+        if(planet_) mode.SetPosition(3.0,view==1 ? 0.4 : 2.1,view==1 ? 0.3 : -0.3);
+        else mode.SetPosition(textures_ ? 2.8 : 4.0, materialViews ? (view == 1 ? 2.74 : 2.04) : (view == 1 ? 0.4 : 1.1), materialViews ? (view == 1 ? -0.6 : -0.8) : (view == 1 ? 0.3 : 0.5));
         mode.SetFOV(40.0); // full vertical FOV in degrees; engine API aperture is half-FOV radians.
         check(oapiSetCameraMode(mode), "engine camera mode rejected");
         controlled_view_=view;
@@ -221,14 +223,21 @@ public:
         td.usage=MTLTextureUsageRenderTarget; td.storageMode=MTLStorageModePrivate;
         mesh_depth_=[device_ newTextureWithDescriptor:td];
         check(mesh_depth_state_ && mesh_depth_, "mesh depth allocation failed");
+        if(planetMode) {
+            planet_=std::make_unique<core_metal::PlanetSurface>();
+            planet_->freeze=planetFreeze; planet_->ignoreSampling=planetIgnore; planet_->swap=planetSwap;
+            planet_->attach(*this,device_);
+        }
     }
     MESHHANDLE clbkGetMesh(VISHANDLE visual, DWORD index) override {
         return gear_ && visual_object_ && visual==reinterpret_cast<VISHANDLE>(this) && index==0 && gear_->handles.valid(gear_->handle) ? gear_->handle : nullptr;
     }
+    bool planetMode=false,planetFreeze=false,planetIgnore=false,planetSwap=false;
     bool gearTest=false,gearFreeze=false,gearCleanupFault=false;
     unsigned gearSplit=0;
     bool detachFocusMesh() noexcept {
         bool ok=true;
+        planet_.reset();
         if(gear_) {
             if(gearCleanupFault) gear_->validationFaultForTest=true;
             ok &= gear_->detach();
@@ -446,6 +455,7 @@ protected:
             check(!range.handle || texture_store_->lookup(range.handle),"stale/foreign texture draw handle");
         if(gear_) gear_->update(renders,gearSplit,gearFreeze); // after actual engine step, before draw
         if(engine_camera_) updateEngineCamera();
+        if(planet_) planet_->update(renders,controlled_view_);
         if(gear_) controlled_view_=renders>gearSplit ? 2 : 1; // snapshot state label, NOT camera mutation
         drawable_ = present_ ? [layer_ nextDrawable] : nil;
         if (present_ && !drawable_) throw std::runtime_error("hidden layer returned no drawable; presentation unavailable (window will NOT be shown)");
@@ -464,6 +474,7 @@ protected:
         buffer_ = [queue_ commandBuffer];
         encoder_ = [buffer_ renderCommandEncoderWithDescriptor:pass];
         if (!buffer_ || !encoder_) throw std::runtime_error("Metal encoding failed");
+        if(planet_) planet_->draw(encoder_,mesh_depth_state_);
         if (mesh_pipeline_) {
             [encoder_ setRenderPipelineState:mesh_pipeline_];
             [encoder_ setDepthStencilState:mesh_depth_state_];
@@ -559,7 +570,7 @@ protected:
                 for (size_t i=0;i<pixels.size();i+=4) {
                     const auto *p=&pixels[i];
                     if(p[0]==128&&p[1]==64&&p[2]==32&&p[3]==255) { ++background; continue; }
-                    if(textures_) { if(p[3]==255) { ++geometry; if(p[0]!=p[1]||p[1]!=p[2]) ++chromatic; } else ++invalid; }
+                    if(textures_ || planetMode) { if(p[3]==255) { ++geometry; if(p[0]!=p[1]||p[1]!=p[2]) ++chromatic; } else ++invalid; }
                     else if(materials_) {
                         bool allowed=std::any_of(material_palette_.begin(),material_palette_.end(),[p](const auto &color){ return core_metal::diffusePixel(p,color.data()); });
                         if(allowed) { ++geometry; if(p[0]!=p[1] || p[1]!=p[2]) ++chromatic; }
@@ -632,7 +643,7 @@ private:
         // Metal clip accepts that same X/Y and 0<=Z<=W. No OpenGL -Z or Y flip:
         // Metal's viewport maps +NDC Y upward into the top-left-origin render target.
         // Client-owned bounded vessel frustum, not claimed to be engine near/far policy.
-        constexpr double nearPlane=0.1, farPlane=1000000.0;
+        const double nearPlane=planetMode ? 1000.0 : 0.1, farPlane=planetMode ? 50000000.0 : 1000000.0;
         double sy=1.0/std::tan(aperture), sx=sy*height/width;
         double a=farPlane/(farPlane-nearPlane), b=-nearPlane*a;
         for(unsigned col=0;col<4;++col) {
@@ -664,6 +675,7 @@ private:
         printf("]}\n");
     }
     void release() {
+        planet_.reset();
         if(texture_store_) {
             printf("[core-metal] texture_store requests=%u successes=%u uploads=%u cache_hits=%u releases=%u invalid_releases=%u resident=%zu group_draws=%u\n",texture_store_->requests,texture_store_->successes,texture_store_->uploads,texture_store_->hits,texture_store_->releases,texture_store_->invalidReleases,texture_store_->resident,texture_group_draws_);
             texture_ranges_.clear(); texture_uvs_=nil; texture_store_.reset();
@@ -681,6 +693,7 @@ private:
         if (sdl_) SDL_Quit();
         sdl_ = false;
     }
+    std::unique_ptr<core_metal::PlanetSurface> planet_;
     std::unique_ptr<core_metal::GearVisual> gear_;
     id<MTLBuffer> gear_normals_=nil;
     bool present_, engine_camera_=false, freeze_clip_=false, materials_=false, sdl_ = false, imgui_ready_ = false;
@@ -729,9 +742,13 @@ int main(int argc, char **argv) {
     bool session=false, sessionTest=false, ignoreInput=false, present=false, bufferedTest=false, ignoreBuffer=false;
     bool platformInput=false,imguiTest=false,ignoreForward=false;
     bool animationContract=false,gearTest=false,gearFreeze=false,gearCleanupFault=false;
+    bool planetFreeze=false,planetIgnore=false,planetSwap=false;
     while(argc>3) {
         std::string option=argv[argc-1];
         if(option=="--hidden-present") { if(present) return 2; present=true; --argc; }
+        else if(option=="--diagnostic-freeze-planet-transform") { if(planetFreeze) return 2; planetFreeze=true; --argc; }
+        else if(option=="--diagnostic-ignore-planet-sampling") { if(planetIgnore) return 2; planetIgnore=true; --argc; }
+        else if(option=="--diagnostic-swap-planet-hemispheres") { if(planetSwap) return 2; planetSwap=true; --argc; }
         else if(option=="--gear-cleanup-fault-test") { if(gearCleanupFault) return 2; gearCleanupFault=true; --argc; }
         else if(option=="--gear-animation-test" || option=="--gear-animation-frozen-test") { if(gearTest) return 2; gearTest=true; gearFreeze=option=="--gear-animation-frozen-test"; --argc; }
         else if(option=="--animation-contract-test") { if(animationContract) return 2; animationContract=true; --argc; }
@@ -749,21 +766,25 @@ int main(int argc, char **argv) {
         } else break;
     }
     if (argc < 3 || argc > 6) {
+        fprintf(stderr,"Earth orbit-only modes: <scenario> <frames> --planet-surface|--planet-surface-test snapshot.ppm [--diagnostic-freeze-planet-transform|--diagnostic-ignore-planet-sampling|--diagnostic-swap-planet-hemispheres]; hidden/offscreen, unlit h=0 sphere, not elevation terrain.\n");
         fprintf(stderr,"Usage (from content root): orbiter-core-metal <scenario> <frames 1..10000> [--mesh snapshot.ppm | --engine-camera snapshot.ppm | --engine-camera-test snapshot.ppm | --diagnostic-frozen-camera-test snapshot.ppm | --materials snapshot.ppm | --materials-test snapshot.ppm | --materials-reference-test snapshot.ppm | --textures snapshot.ppm | --textures-test snapshot.ppm | --textures-ignore-sampling-test snapshot.ppm] [--hidden-present] [--animation-contract-test | --gear-animation-test | --gear-animation-frozen-test] [--platform-input | --imgui-input-test | --imgui-input-ignore-test | --buffered-input-test | --buffered-input-ignore-test | --session-input | --session-input-test | --session-input-ignore-test]\nSession test modes require a bound of at least 16 frames; all windows remain hidden.\n");
         return 2;
     }
     char *end = nullptr;
     long frames = strtol(argv[2], &end, 10);
     int modeArgc=argc;
+    bool planet=modeArgc==5 && (std::string(argv[3])=="--planet-surface" || std::string(argv[3])=="--planet-surface-test");
+    if((planetFreeze||planetIgnore||planetSwap) && !planet) return 2;
+    if(planet && (session||gearTest||animationContract||present)) return 2;
     bool textures=modeArgc==5 && (std::string(argv[3])=="--textures" || std::string(argv[3])=="--textures-test" || std::string(argv[3])=="--textures-ignore-sampling-test");
     if (!end || *end || frames < 1 || frames > 10000 ||
         (modeArgc != 3 && modeArgc != 5) ||
-        (modeArgc == 5 && ((!textures && std::string(argv[3]) != "--mesh" && std::string(argv[3]) != "--engine-camera" && std::string(argv[3]) != "--engine-camera-test" && std::string(argv[3]) != "--diagnostic-frozen-camera-test" && std::string(argv[3]) != "--materials" && std::string(argv[3]) != "--materials-test" && std::string(argv[3]) != "--materials-reference-test") || !argv[4][0]))) return 2;
+        (modeArgc == 5 && ((!planet && !textures && std::string(argv[3]) != "--mesh" && std::string(argv[3]) != "--engine-camera" && std::string(argv[3]) != "--engine-camera-test" && std::string(argv[3]) != "--diagnostic-frozen-camera-test" && std::string(argv[3]) != "--materials" && std::string(argv[3]) != "--materials-test" && std::string(argv[3]) != "--materials-reference-test") || !argv[4][0]))) return 2;
     bool engineCamera=modeArgc==5 && std::string(argv[3])!="--mesh";
     bool freezeClip=modeArgc==5 && std::string(argv[3])=="--diagnostic-frozen-camera-test";
     bool materials=textures || (modeArgc==5 && (std::string(argv[3])=="--materials" || std::string(argv[3])=="--materials-test"));
     bool materialViews=(textures && std::string(argv[3])!="--textures") || (modeArgc==5 && (std::string(argv[3])=="--materials-test" || std::string(argv[3])=="--materials-reference-test"));
-    bool cameraTest=modeArgc==5 && (std::string(argv[3])=="--engine-camera-test" || materialViews || freezeClip);
+    bool cameraTest=modeArgc==5 && (std::string(argv[3])=="--planet-surface-test" || std::string(argv[3])=="--engine-camera-test" || materialViews || freezeClip);
     if(cameraTest && frames<2) return 2;
     if(sessionTest && frames<16) return 2;
     if(bufferedTest && frames<19) return 2;
@@ -793,6 +814,7 @@ int main(int argc, char **argv) {
             g_pOrbiter->SetFastExit(false);
             client = new CoreMetalClient(present, modeArgc == 5 ? argv[4] : "", engineCamera, freezeClip, materials, textures, textures && std::string(argv[3])=="--textures-ignore-sampling-test");
             client->platformInput=platformInput;
+            client->planetMode=planet; client->planetFreeze=planetFreeze; client->planetIgnore=planetIgnore; client->planetSwap=planetSwap;
             client->animationContract=animationContract;
             client->gearTest=gearTest; client->gearFreeze=gearFreeze; client->gearSplit=unsigned(frames/2);
             client->gearCleanupFault=gearCleanupFault;
