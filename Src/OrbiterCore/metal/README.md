@@ -283,6 +283,60 @@ CPU render evidence. Hidden/offscreen images match; actual scanout remains
 unproven. Scope remains the first static DG diffuse pass, not terrain, HUD,
 Sketchpad, general surfaces, animation or fully lit/transparent vessels.
 
+## Bounded native buffered keyboard commands
+
+The same `--session-input` pump now supplies genuine physical transitions to the
+shim's `GetDeviceData`, separately from `GetDeviceState`. The actual default
+pause binding is **Ctrl+P**, not bare P or the Pause key (`Keymap.cpp`). The engine
+route is `SingleFrame -> UserInput -> GetDeviceData -> KbdInputBuffered_System ->
+IsLogicalKey(OAPI_LKEY_Pause) -> TogglePause`. `Pause` only requests a state change;
+**the next BeginTimeStep applies it**. Neither the engine input handlers nor the
+pause implementation is patched or bypassed.
+
+The single-main-thread keyboard backend implements a fixed allocation ring
+(maximum 256 events; the engine requests 10 with `DIPROP_BUFFERSIZE`). Each real
+change stores DIK `dwOfs`, `dwData` 0x80/0, monotonic milliseconds modulo DWORD,
+monotonic sequence modulo DWORD, and zero `uUser`. Repeated held publications and
+all already-clear entries in the adapter's 256-key clear loop enqueue nothing.
+Focus/hide/quit/teardown publish only genuine releases. Held-state polling is
+independent of event consumption. No global SDL hardware state is consulted.
+
+Supported reads require the exact native `sizeof(DIDEVICEOBJECTDATA)` and flags
+zero or `DIGDD_PEEK`. `*items` is the maximum requested; it becomes the number
+returned. A null output counts/discards up to that maximum, while null+PEEK counts
+without consuming. Zero requests return zero. A full ring preserves oldest unread
+events, drops incoming events and latches `DI_BUFFEROVERFLOW`; PEEK leaves the
+latch set and a non-PEEK read acknowledges it. Unacquire flushes queued commands;
+transitions while unacquired affect held state but are not replayed on Acquire.
+Acquire is idempotent. Release flushes and disables buffering and clears held
+state. Configuration requires an unacquired keyboard and a valid device-scoped
+DIPROPDWORD; capacity over 256 is rejected, not silently clamped. Invalid stride,
+flags, null count, unbuffered reads and unsupported properties return errors.
+Only one keyboard is supported; the mouse token is separate and explicitly has
+no buffered keyboard queue. This is not general DirectInput emulation.
+
+```sh
+cmake --build out/build/macos-core-spike \
+  --target orbiter-core-metal orbiter-buffered-input-tests -j6
+out/build/macos-core-spike/Src/OrbiterCore/metal/orbiter-buffered-input-tests
+python3 Src/OrbiterCore/metal/buffered_regression.py \
+  out/build/macos-core-spike/Src/OrbiterCore/metal/orbiter-core-metal \
+  out/stage/content /Users/redezem/.hermes/cache/scratch/orbiter-buffered-check
+# Optional: append --hidden-present (still hidden, no scanout guarantee).
+```
+
+The test-only `--buffered-input-test` runs 19 actual frames inside a requested
+23-frame bound and quits via process-local SDL events. Three runs independently
+verify actual `oapiGetPause`, simulation-time advance/freeze, and engine-polled
+P/left-Ctrl/right-Ctrl, including bare P, repeated down, held frames with no events,
+keyup/repress, focus-clear and right-Ctrl. Normal core/ImGui/Metal teardown and
+exact GPU completion/readback counts are required. The negative
+`--buffered-input-ignore-test` publishes identical held keys but deliberately
+suppresses buffered events: it must stay running and fail the pause oracle with a
+nonzero exit **after normal teardown**. No `oapiSetPause`, direct engine SendKbd,
+visible window, focus activation or OS injection is used. SDL-to-ImGui platform
+input is still missing: this is not a full keyboard/UI or interactive-app claim.
+
 ## Bounded native SDL held-key session bridge
 
 Append `--session-input` to any existing mode to opt into a main-thread SDL event
@@ -309,8 +363,9 @@ logical graphics session; `SingleFrame` reaches `UserInput`, which calls the
 shim device's `GetDeviceState`. It copies `shim_kbd_state` into the engine's
 `simkstate`, respects dialogs/module consumption and ImGui keyboard capture, then
 `KbdInputImmediate_OnRunning` resolves the actual keymap. Ctrl+keypad-plus/minus
-calls `Vessel::IncMainRetroLevel` with the real simulation timestep. No core,
-Input.cpp, DirectInput shim, world pose, physics or throttle setter was changed.
+calls `Vessel::IncMainRetroLevel` with the real simulation timestep. No core
+Input.cpp, world pose, physics or throttle setter is used by the probe. The native
+DirectInput shim now additionally implements the bounded buffered path below.
 A logically active graphics session is distinct from OS keyboard/window focus.
 
 The explicit **test-only** `--session-input-test` requires a bound of at least
@@ -357,9 +412,9 @@ disabled. Its control oracle must fail nonzero after normal teardown. CPU adapte
 tests also poll the actual DI shim device and exercise modifiers, repeats,
 window isolation and all clear/quit paths without initialising SDL video.
 
-This implements **held-key immediate controls only**, not DirectInput buffered
-commands (`GetDeviceData` still returns zero events), SDL-to-ImGui platform input,
-mouse/cockpit interaction, pause/menu/key-command completeness, joystick/gamepad,
+This implements held-key immediate controls and the bounded buffered keyboard
+path below, not SDL-to-ImGui platform input, mouse/cockpit interaction,
+menu/key-command completeness, joystick/gamepad,
 full HUD/MFD/Sketchpad, terrain, animation, alpha blending or general interactive
 app readiness. Existing clear/mesh/camera/material/texture modes do not pump
 session input unless explicitly opted in; their regressions remain separate.

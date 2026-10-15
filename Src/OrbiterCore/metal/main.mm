@@ -31,6 +31,7 @@
 #include "texture_evidence.h"
 #include "session_input.h"
 #include "session_control_probe.h"
+#include "buffered_control_probe.h"
 
 extern Orbiter *g_pOrbiter;
 
@@ -622,10 +623,14 @@ private:
 
 int main(int argc, char **argv) {
     // Independent trailing session/presentation options leave old positional modes intact.
-    bool session=false, sessionTest=false, ignoreInput=false, present=false;
+    bool session=false, sessionTest=false, ignoreInput=false, present=false, bufferedTest=false, ignoreBuffer=false;
     while(argc>3) {
         std::string option=argv[argc-1];
         if(option=="--hidden-present") { if(present) return 2; present=true; --argc; }
+        else if(option=="--buffered-input-test" || option=="--buffered-input-ignore-test") {
+            if(session) return 2;
+            session=true; bufferedTest=true; ignoreBuffer=option=="--buffered-input-ignore-test"; --argc;
+        }
         else if(option=="--session-input" || option=="--session-input-test" || option=="--session-input-ignore-test") {
             if(session) return 2;
             session=true; sessionTest=option!="--session-input"; ignoreInput=option=="--session-input-ignore-test"; --argc;
@@ -649,6 +654,7 @@ int main(int argc, char **argv) {
     bool cameraTest=modeArgc==5 && (std::string(argv[3])=="--engine-camera-test" || materialViews || freezeClip);
     if(cameraTest && frames<2) return 2;
     if(sessionTest && frames<16) return 2;
+    if(bufferedTest && frames<19) return 2;
     setvbuf(stdout, nullptr, _IONBF, 0);
     @autoreleasepool {
         g_pOrbiter = new Orbiter;
@@ -656,6 +662,7 @@ int main(int argc, char **argv) {
         bool attached = false, launched = false;
         std::unique_ptr<core_metal::SessionInput> input;
         std::unique_ptr<core_metal::SessionControlProbe> controlProbe;
+        std::unique_ptr<core_metal::BufferedControlProbe> bufferedProbe;
         int result = 1;
         try {
             std::string cmd = "--scenariox=\"" + std::string(argv[1]) + "\"";
@@ -678,22 +685,25 @@ int main(int argc, char **argv) {
             client->attachFocusMesh();
             if(session) {
                 if(!g_pOrbiter->GetDInput()->GetKbdDevice()) throw std::runtime_error("native session has no actual keyboard device");
-                input=std::make_unique<core_metal::SessionInput>(client->windowID(),ignoreInput ? +[](unsigned,bool){} : shim_set_key);
+                input=std::make_unique<core_metal::SessionInput>(client->windowID(),ignoreInput ? +[](unsigned,bool){} : (ignoreBuffer ? shim_set_key_state_only : shim_set_key));
                 input->pump(); // drain startup window notifications before the test schedule
+                if(bufferedTest) bufferedProbe=std::make_unique<core_metal::BufferedControlProbe>(client->windowID());
                 if(sessionTest) controlProbe=std::make_unique<core_metal::SessionControlProbe>(client->windowID());
-                printf("[core-metal] session input=held-DIK hidden=1 buffered_commands=unsupported bridge_publication=%u\n",!ignoreInput);
+                printf("[core-metal] session input=held-DIK hidden=1 buffered_commands=bounded-transitions bridge_publication=%u buffered_publication=%u\n",!ignoreInput,!ignoreBuffer);
             }
             unsigned executed=0;
             for (long i=0; i<frames; ++i) { @autoreleasepool {
                 if(controlProbe) controlProbe->before(static_cast<unsigned>(i));
+                if(bufferedProbe) bufferedProbe->before(static_cast<unsigned>(i));
                 if(input) input->pump();
                 if(cameraTest && (i==0 || i==frames/2)) client->setTestCamera(i==0 ? 1 : 2,materialViews);
                 g_pOrbiter->SingleFrame();
                 ++executed;
                 if(controlProbe) controlProbe->after(static_cast<unsigned>(i),g_pOrbiter->KeyState());
+                if(bufferedProbe) bufferedProbe->after(static_cast<unsigned>(i),g_pOrbiter->KeyState());
                 if(input && input->quitRequested()) break;
             } }
-            bool controlsOK=!controlProbe || controlProbe->verified();
+            bool controlsOK=(!controlProbe || controlProbe->verified()) && (!bufferedProbe || bufferedProbe->verified());
             input.reset(); // all held keys released before core/device/world teardown
             client->detachFocusMesh();
             g_pOrbiter->CloseSession();

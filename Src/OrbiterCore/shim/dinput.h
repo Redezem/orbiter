@@ -1,6 +1,6 @@
-// macOS port shim: DirectInput types referenced by Di7frame.h. The macOS
-// host supplies input via SDL; these types only need to exist for the
-// legacy header to parse.
+// macOS DirectInput compatibility subset. The main-thread SDL host publishes
+// physical keyboard transitions; held state and bounded buffered reads feed
+// the unmodified engine input path. Other device capabilities remain limited.
 
 #ifndef ORBITER_MACOS_SHIM_DINPUT_H
 #define ORBITER_MACOS_SHIM_DINPUT_H
@@ -202,6 +202,16 @@ using LPCDIDEVICEINSTANCE = const DIDEVICEINSTANCE *;
 
 extern char shim_kbd_state[256];      // published by the macOS host
 void shim_set_key(unsigned int scancode, bool down);
+// Diagnostic negative control: held state only, deliberately no queued transition.
+void shim_set_key_state_only(unsigned int scancode, bool down);
+
+// Supported buffered-keyboard subset; same flag/status values as DirectInput.
+#ifndef DIGDD_PEEK
+#define DIGDD_PEEK 1u
+#endif
+#ifndef DI_BUFFEROVERFLOW
+#define DI_BUFFEROVERFLOW 1L
+#endif
 
 struct IDirectInputDevice8Shim {
 	HRESULT GetDeviceState(DWORD size, void *out)
@@ -211,20 +221,18 @@ struct IDirectInputDevice8Shim {
 		memcpy(out, shim_kbd_state, size);
 		return DI_OK;
 	}
-	HRESULT Acquire() { return DI_OK; }
+	// Single main-thread keyboard backend. Mouse remains explicitly unbuffered.
+	explicit IDirectInputDevice8Shim(bool keyboard = true) : keyboard_(keyboard) {}
+	HRESULT Acquire();
 	HRESULT SetCooperativeLevel(HWND hwnd, DWORD flags) { (void)hwnd; (void)flags; return DI_OK; }
-	HRESULT GetDeviceData(DWORD cb, DIDEVICEOBJECTDATA *out, DWORD *items, DWORD flags)
-	{
-		(void)cb; (void)out; (void)flags;
-		if (items) *items = 0;
-		return DI_OK;
-	}
+	HRESULT GetDeviceData(DWORD cb, DIDEVICEOBJECTDATA *out, DWORD *items, DWORD flags);
 	HRESULT Poll() { return DI_OK; }
-	HRESULT Unacquire() { return DI_OK; }
-	void Release() {}
+	HRESULT Unacquire();
+	void Release();
 	HRESULT SetDataFormat(const void *fmt) { (void)fmt; return DI_OK; }
-	HRESULT SetProperty(DWORD obj, const void *data)
-	{ (void)obj; (void)data; return DI_OK; }
+	HRESULT SetProperty(DWORD obj, const void *data);
+private:
+	bool keyboard_;
 };
 
 #ifndef DIERR_NOINTERFACE
@@ -295,12 +303,18 @@ extern DIDATAFORMAT shim_dfDIJoystick2;
 
 typedef int (*DIENUMDEVICESCALLBACK)(LPCDIDEVICEINSTANCE, void *);
 
-// DirectInput8 object: CreateDevice hands out the inert device shim.
+// One keyboard plus a distinct limited mouse token; no joystick enumeration.
 struct IDirectInputDevice8Shim;
 using LPDIRECTINPUTDEVICE8 = IDirectInputDevice8Shim *;
 struct DirectInput8Shim : ComReleasable {
 	HRESULT CreateDevice(GUID guid, LPDIRECTINPUTDEVICE8 *out, void *outer)
-	{ (void)guid; (void)outer; static IDirectInputDevice8Shim dev; *out = &dev; return DI_OK; }
+	{ (void)outer; if (!out) return DIERR_INVALIDPARAM;
+	  *out = nullptr;
+	  static IDirectInputDevice8Shim keyboard(true), mouse(false);
+	  if (guid == GUID_SysKeyboard) *out = &keyboard;
+	  else if (guid == GUID_SysMouse) *out = &mouse;
+	  else return DIERR_NOINTERFACE;
+	  return DI_OK; }
 	HRESULT EnumDevices(DWORD classMask, DIENUMDEVICESCALLBACK cb, void *ctx, DWORD flags)
 	{ (void)classMask; (void)cb; (void)ctx; (void)flags; return DI_OK; }
 	HRESULT SetProperty(DWORD obj, const void *data) { (void)obj; (void)data; return DI_OK; }
@@ -309,7 +323,7 @@ struct DirectInput8Shim : ComReleasable {
 using LPDIRECTINPUT8 = DirectInput8Shim *;
 using LPDIRECTINPUTDEVICE8 = IDirectInputDevice8Shim *;
 
-// DirectInput8Create entry point (Di7frame.cpp). Returns the inert shim.
+// DirectInput8Create entry point (Di7frame.cpp). Returns the native subset.
 inline HRESULT DirectInput8Create(void *hinst, DWORD version, const GUID &iid, void **out, void *outer)
 {
 	(void)hinst; (void)version; (void)iid; (void)outer;

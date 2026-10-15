@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 HERE = Path(__file__).resolve().parent
-RUNNERS = ('camera', 'material', 'texture', 'session')
+RUNNERS = ('camera', 'material', 'texture', 'session', 'buffered')
 
 
 class FixtureStaging(unittest.TestCase):

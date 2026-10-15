@@ -7,7 +7,7 @@ namespace core_metal {
 unsigned directInputScancode(SDL_Scancode code);
 
 // One SDL window, one main-thread owner. No OS input polling or injection.
-// Publishes held state, not buffered commands (the DI shim has no event queue).
+// Publishes physical transitions; the DI shim maintains held state and a bounded queue.
 class SessionInput {
 public:
     using Publish = void (*)(unsigned, bool);
