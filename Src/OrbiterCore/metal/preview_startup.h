@@ -41,7 +41,7 @@ struct PreviewStartup {
             readableDirectory(path);
         for(const auto &name:{"Orbiter.cfg","Config/Earth.cfg","Textures/Earth/Archive/Surf.tree","Modules/Celbody/Earth/Atmosphere/EarthAtmJ71G.dylib","Modules/DeltaGlider.dylib"})
             readableFile(content/name);
-        for(const auto &name:{"MetalEarth.cfg","MetalTerrainVessel.scn"}) readableFile(resources/name);
+        for(const auto &name:{"MetalEarth.cfg","MetalTerrainVessel.scn","keymap-seed.txt"}) readableFile(resources/name);
         for(const auto &item:fs::directory_iterator(content))
             if(item.path().extension()==".cfg") readableFile(item.path());
         fs::path parent=fs::path(NSHomeDirectory().UTF8String)/"Library/Application Support/OrbiterCorePreview/Sessions";
@@ -53,6 +53,10 @@ struct PreviewStartup {
         auto copy=[&](fs::path source,fs::path target){ fs::copy_file(source,target,fs::copy_options::none); };
         copy(resources/"MetalEarth.cfg",launch/"Config/MetalEarth.cfg");
         copy(resources/"MetalTerrainVessel.scn",launch/"Scenarios/MetalTerrainVessel.scn");
+        // Ship the laptop keymap seed as the session keymap.cfg. Keymap::Read
+        // starts from SetDefault(), so seed-only lines override just the
+        // keypad-only actions and leave every other engine binding at default.
+        copy(resources/"keymap-seed.txt",launch/"keymap.cfg");
         {std::ofstream f(launch/"Config/Earth/Atmosphere.cfg"); f<<"MODULE_ATM = EarthAtmJ71G\n"; if(!f) throw std::runtime_error("private atmosphere config write failed");}
         auto linkRemaining=[&](fs::path from,fs::path to){
             for(const auto &item:fs::directory_iterator(from)) {

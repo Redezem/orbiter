@@ -24,6 +24,9 @@ def package(executable, content, bundle, sdl):
     fixtures = Path(__file__).resolve().with_name('fixtures')
     for name in ('MetalEarth.cfg', 'MetalTerrainVessel.scn'):
         shutil.copy2(fixtures / name, resources / name)
+    # The shipped visible preview stages this seed as keymap.cfg so the engine
+    # reads laptop-reachable bindings instead of keypad-only defaults.
+    shutil.copy2(fixtures / 'laptop-keymap-lines.txt', resources / 'keymap-seed.txt')
     (resources / 'content-root.txt').write_text(str(content) + '\n')
     lines = subprocess.check_output(['otool', '-l', str(target)], text=True).splitlines()
     minimum_os = next(line.split()[1] for line in lines if line.strip().startswith('minos '))

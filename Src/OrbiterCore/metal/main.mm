@@ -30,8 +30,10 @@
 #include "metal_textures.h"
 #include "texture_evidence.h"
 #include "session_input.h"
+#include "preview_keymap.h"
 #include "session_control_probe.h"
 #include "buffered_control_probe.h"
+#include "laptop_control_probe.h"
 #include "imgui_platform.h"
 #include "backends/imgui_impl_sdl3.h"
 #include "imgui_input_probe.h"
@@ -773,6 +775,7 @@ int main(int argc, char **argv) {
     // Independent trailing session/presentation options leave old positional modes intact.
     bool session=false, sessionTest=false, ignoreInput=false, present=false, bufferedTest=false, ignoreBuffer=false;
     bool platformInput=false,imguiTest=false,ignoreForward=false;
+    bool laptopTest=false,laptopIgnore=false;
     bool animationContract=false,gearTest=false,gearFreeze=false,gearCleanupFault=false;
     bool terrainCoast=false,terrainFlat=false,terrainFreeze=false,terrainSwap=false;
     bool omitVessel=false,omitTerrain=false,disableSceneDepth=false,terrainLast=false;
@@ -805,6 +808,9 @@ int main(int argc, char **argv) {
         else if(option=="--session-input" || option=="--session-input-test" || option=="--session-input-ignore-test") {
             if(session) return 2;
             session=true; sessionTest=option!="--session-input"; ignoreInput=option=="--session-input-ignore-test"; --argc;
+        } else if(option=="--session-laptop-test" || option=="--session-laptop-ignore-test") {
+            if(session) return 2;
+            session=true; laptopTest=true; ignoreInput=laptopIgnore=option=="--session-laptop-ignore-test"; --argc;
         } else break;
     }
     if (argc < 3 || argc > 6) {
@@ -840,6 +846,7 @@ int main(int argc, char **argv) {
     if(preview.active) cameraTest=false; // initial tracked DG view only; subsequent pose is engine-owned
     if(cameraTest && frames<2) return 2;
     if(sessionTest && frames<16) return 2;
+    if(laptopTest && frames<16) return 2;
     if(bufferedTest && frames<19) return 2;
     if(imguiTest && frames<22) return 2;
     if(animationContract && (modeArgc!=5 || session)) return 2;
@@ -854,6 +861,7 @@ int main(int argc, char **argv) {
         std::unique_ptr<core_metal::SessionControlProbe> controlProbe;
         std::unique_ptr<core_metal::BufferedControlProbe> bufferedProbe;
         std::unique_ptr<core_metal::ImGuiInputProbe> imguiProbe;
+        std::unique_ptr<core_metal::LaptopControlProbe> laptopProbe;
         int result = 1;
         try {
             std::string cmd = "--scenariox=\"" + std::string(argv[1]) + "\"";
@@ -892,17 +900,30 @@ int main(int argc, char **argv) {
                 if(!g_pOrbiter->GetDInput()->GetKbdDevice()) throw std::runtime_error("native session has no actual keyboard device");
                 auto publisher=ignoreInput ? +[](unsigned,bool){} : (ignoreBuffer ? shim_set_key_state_only : shim_set_key);
                 if(preview.active) publisher=+[](unsigned key,bool down) {
-                    // Deliberately bounded preview contract: flight keypad, modifiers,
+                    // Deliberately bounded preview contract: flight keypad, the
+                    // laptop flight keys named by preview_keymap.h, modifiers,
                     // and Ctrl+P only. No save/dialog/gear shortcuts or text entry.
-                    if((key>=0x47 && key<=0x53) || key==0x37 || key==0xb5 ||
-                       key==0x19 || key==0x1d || key==0x9d || key==0x2a || key==0x36)
-                        shim_set_key(key,down);
-                };
+                    bool allowed=(key>=0x47 && key<=0x53) || key==0x37 || key==0xb5 ||
+                       key==0x19 || key==0x1d || key==0x9d || key==0x2a || key==0x36;
+                    for(auto code:core_metal::previewLaptopPhysicalKeys())
+                        allowed = allowed || key==core_metal::directInputScancode(code);
+                    if(allowed) shim_set_key(key,down);
+                }; else if(laptopTest && !laptopIgnore) publisher=+[](unsigned key,bool down) {
+                    // Laptop regression mirrors the preview publisher allowlist so
+                    // the hidden test proves exactly the shipped physical contract;
+                    // the ignore variant publishes nothing at all.
+                    bool allowed=(key>=0x47 && key<=0x53) || key==0x37 || key==0xb5 ||
+                       key==0x19 || key==0x1d || key==0x9d || key==0x2a || key==0x36;
+                    for(auto code:core_metal::previewLaptopPhysicalKeys())
+                        allowed = allowed || key==core_metal::directInputScancode(code);
+                    if(allowed) shim_set_key(key,down);
+                }; // ignore variant keeps the base no-op publisher
                 input=std::make_unique<core_metal::SessionInput>(client->windowID(),publisher,platformInput && !ignoreForward ? core_metal::processImGuiEvent : nullptr);
                 input->pump(); // drain startup window notifications before the test schedule
                 if(imguiTest) imguiProbe=std::make_unique<core_metal::ImGuiInputProbe>(client->windowID());
                 if(bufferedTest) bufferedProbe=std::make_unique<core_metal::BufferedControlProbe>(client->windowID());
                 if(sessionTest) controlProbe=std::make_unique<core_metal::SessionControlProbe>(client->windowID());
+                if(laptopTest) laptopProbe=std::make_unique<core_metal::LaptopControlProbe>(client->windowID());
                 printf("[core-metal] session input=held-DIK hidden=%u buffered_commands=bounded-transitions bridge_publication=%u buffered_publication=%u\n",!client->visiblePreview,!ignoreInput,!ignoreBuffer);
             }
             unsigned executed=0;
@@ -915,6 +936,7 @@ int main(int argc, char **argv) {
                 if(controlProbe) controlProbe->before(static_cast<unsigned>(i));
                 if(bufferedProbe) bufferedProbe->before(static_cast<unsigned>(i));
                 if(imguiProbe) imguiProbe->before(static_cast<unsigned>(i));
+                if(laptopProbe) laptopProbe->before(static_cast<unsigned>(i));
                 if(input) input->pump();
                 if(preview.active && input->quitRequested()) break;
                 if(cameraTest && (i==0 || i==frames/2)) client->setTestCamera(i==0 ? 1 : 2,materialViews);
@@ -928,10 +950,11 @@ int main(int argc, char **argv) {
                 if(controlProbe) controlProbe->after(static_cast<unsigned>(i),g_pOrbiter->KeyState());
                 if(bufferedProbe) bufferedProbe->after(static_cast<unsigned>(i),g_pOrbiter->KeyState());
                 if(imguiProbe) imguiProbe->after(static_cast<unsigned>(i),g_pOrbiter->KeyState());
+                if(laptopProbe) laptopProbe->after(static_cast<unsigned>(i),g_pOrbiter->KeyState());
                 if(input && input->quitRequested()) break;
                 if(preview.active) SDL_Delay(16);
             } }
-            bool controlsOK=(!controlProbe || controlProbe->verified()) && (!bufferedProbe || bufferedProbe->verified()) && (!imguiProbe || imguiProbe->verified());
+            bool controlsOK=(!controlProbe || controlProbe->verified()) && (!bufferedProbe || bufferedProbe->verified()) && (!imguiProbe || imguiProbe->verified()) && (!laptopProbe || laptopProbe->verified());
             if(preview.active && preview.hidden) {
                 controlsOK &= executed==unsigned(frames) && input->quitRequested();
                 printf("[core-preview] bounded frames=%u real_pause=%u SDL_quit=%u\n",executed,oapiGetPause(),input->quitRequested());

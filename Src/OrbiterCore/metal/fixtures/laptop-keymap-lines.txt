@@ -1,0 +1,43 @@
+# Laptop keyboard flight bindings (preview seed).
+# Engine-default actions whose base key exists only on a numeric keypad
+# (Src/Orbiter/Keymap.cpp lkeyspec), restated with physically laptop-reachable
+# base keys. Syntax is the engine keymap.cfg vocabulary (Keymap::ScanStr).
+# First match wins in Keymap::Read, so these lines must precede the generated
+# engine defaults in keymap.cfg. Deliberate conflicts, matching stock Orbiter
+# layering (immediate handlers consume keys only in their own modes):
+#  - Ctrl+1/2 replace Ctrl+keypad +/-; main-row 1/2 have no default binding.
+#  - 1/2 additionally bank; arrows additionally panel-shift (internal only);
+#    H/J/K/L additionally HUDMode; none collide in external flight view.
+IncMainThrust = 1 CTRL
+DecMainThrust = 2 CTRL
+KillMainRetroThrust = 3
+OverrideFullMainThrust = 4
+OverrideFullRetroThrust = 7
+IncHoverThrust = 9
+DecHoverThrust = 6
+RCSEnable = SLASH CTRL
+RCSMode = SLASH
+RCSPitchUp = J
+RCSPitchDown = K
+RCSYawLeft = H
+RCSYawRight = L
+RCSBankLeft = 1
+RCSBankRight = 2
+RCSUp = DOWN
+RCSDown = UP
+RCSLeft = LEFT
+RCSRight = RIGHT
+RCSForward = INSERT
+RCSBack = HOME
+LPRCSPitchUp = J CTRL
+LPRCSPitchDown = K CTRL
+LPRCSYawLeft = H CTRL
+LPRCSYawRight = L CTRL
+LPRCSBankLeft = 1 CTRL
+LPRCSBankRight = 2 CTRL
+LPRCSUp = DOWN CTRL
+LPRCSDown = UP CTRL
+LPRCSLeft = LEFT CTRL
+LPRCSRight = RIGHT CTRL
+LPRCSForward = INSERT CTRL
+LPRCSBack = HOME CTRL
