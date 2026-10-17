@@ -34,6 +34,7 @@
 #include "session_control_probe.h"
 #include "buffered_control_probe.h"
 #include "laptop_control_probe.h"
+#include "unpause_control_probe.h"
 #include "imgui_platform.h"
 #include "backends/imgui_impl_sdl3.h"
 #include "imgui_input_probe.h"
@@ -776,6 +777,7 @@ int main(int argc, char **argv) {
     bool session=false, sessionTest=false, ignoreInput=false, present=false, bufferedTest=false, ignoreBuffer=false;
     bool platformInput=false,imguiTest=false,ignoreForward=false;
     bool laptopTest=false,laptopIgnore=false;
+    bool unpauseTest=false,unpauseIgnore=false;
     bool animationContract=false,gearTest=false,gearFreeze=false,gearCleanupFault=false;
     bool terrainCoast=false,terrainFlat=false,terrainFreeze=false,terrainSwap=false;
     bool omitVessel=false,omitTerrain=false,disableSceneDepth=false,terrainLast=false;
@@ -811,6 +813,9 @@ int main(int argc, char **argv) {
         } else if(option=="--session-laptop-test" || option=="--session-laptop-ignore-test") {
             if(session) return 2;
             session=true; laptopTest=true; ignoreInput=laptopIgnore=option=="--session-laptop-ignore-test"; --argc;
+        } else if(option=="--session-unpause-test" || option=="--session-unpause-ignore-test") {
+            if(session) return 2;
+            session=true; unpauseTest=true; ignoreInput=unpauseIgnore=option=="--session-unpause-ignore-test"; --argc;
         } else break;
     }
     if (argc < 3 || argc > 6) {
@@ -847,6 +852,7 @@ int main(int argc, char **argv) {
     if(cameraTest && frames<2) return 2;
     if(sessionTest && frames<16) return 2;
     if(laptopTest && frames<16) return 2;
+    if(unpauseTest && frames<(long)core_metal::UnpauseControlProbe::FRAMES) return 2;
     if(bufferedTest && frames<19) return 2;
     if(imguiTest && frames<22) return 2;
     if(animationContract && (modeArgc!=5 || session)) return 2;
@@ -862,6 +868,7 @@ int main(int argc, char **argv) {
         std::unique_ptr<core_metal::BufferedControlProbe> bufferedProbe;
         std::unique_ptr<core_metal::ImGuiInputProbe> imguiProbe;
         std::unique_ptr<core_metal::LaptopControlProbe> laptopProbe;
+        std::unique_ptr<core_metal::UnpauseControlProbe> unpauseProbe;
         int result = 1;
         try {
             std::string cmd = "--scenariox=\"" + std::string(argv[1]) + "\"";
@@ -894,6 +901,7 @@ int main(int argc, char **argv) {
             printf("[core-metal] focus=%s scenario=%s frames=%ld\n", oapiGetFocusInterface()->GetName(), argv[1], frames);
             client->attachFocusMesh();
             if(preview.active) { g_pOrbiter->Pause(true); printf("[core-preview] engine Pause(true); Ctrl+P toggles real engine pause; static DG mesh, no gear animation\n"); }
+            if(unpauseTest) { g_pOrbiter->Pause(true); printf("[core-metal] unpause_session_start=paused host Pause(true); real Ctrl+P must unpause\n"); }
             if(animationContract) core_metal::probeAnimationContract(*client);
             if(gearTest) client->setTestCamera(1);
             if(session) {
@@ -924,6 +932,7 @@ int main(int argc, char **argv) {
                 if(bufferedTest) bufferedProbe=std::make_unique<core_metal::BufferedControlProbe>(client->windowID());
                 if(sessionTest) controlProbe=std::make_unique<core_metal::SessionControlProbe>(client->windowID());
                 if(laptopTest) laptopProbe=std::make_unique<core_metal::LaptopControlProbe>(client->windowID());
+                if(unpauseTest) unpauseProbe=std::make_unique<core_metal::UnpauseControlProbe>(client->windowID());
                 printf("[core-metal] session input=held-DIK hidden=%u buffered_commands=bounded-transitions bridge_publication=%u buffered_publication=%u\n",!client->visiblePreview,!ignoreInput,!ignoreBuffer);
             }
             unsigned executed=0;
@@ -937,6 +946,7 @@ int main(int argc, char **argv) {
                 if(bufferedProbe) bufferedProbe->before(static_cast<unsigned>(i));
                 if(imguiProbe) imguiProbe->before(static_cast<unsigned>(i));
                 if(laptopProbe) laptopProbe->before(static_cast<unsigned>(i));
+                if(unpauseProbe) unpauseProbe->before(static_cast<unsigned>(i));
                 if(input) input->pump();
                 if(preview.active && input->quitRequested()) break;
                 if(cameraTest && (i==0 || i==frames/2)) client->setTestCamera(i==0 ? 1 : 2,materialViews);
@@ -951,15 +961,17 @@ int main(int argc, char **argv) {
                 if(bufferedProbe) bufferedProbe->after(static_cast<unsigned>(i),g_pOrbiter->KeyState());
                 if(imguiProbe) imguiProbe->after(static_cast<unsigned>(i),g_pOrbiter->KeyState());
                 if(laptopProbe) laptopProbe->after(static_cast<unsigned>(i),g_pOrbiter->KeyState());
+                if(unpauseProbe) unpauseProbe->after(static_cast<unsigned>(i),g_pOrbiter->KeyState());
                 if(input && input->quitRequested()) break;
                 if(preview.active) SDL_Delay(16);
             } }
-            bool controlsOK=(!controlProbe || controlProbe->verified()) && (!bufferedProbe || bufferedProbe->verified()) && (!imguiProbe || imguiProbe->verified()) && (!laptopProbe || laptopProbe->verified());
+            bool controlsOK=(!controlProbe || controlProbe->verified()) && (!bufferedProbe || bufferedProbe->verified()) && (!imguiProbe || imguiProbe->verified()) && (!laptopProbe || laptopProbe->verified()) && (!unpauseProbe || unpauseProbe->verified());
             if(preview.active && preview.hidden) {
                 controlsOK &= executed==unsigned(frames) && input->quitRequested();
                 printf("[core-preview] bounded frames=%u real_pause=%u SDL_quit=%u\n",executed,oapiGetPause(),input->quitRequested());
             }
             imguiProbe.reset();
+            unpauseProbe.reset();
             input.reset(); // all held keys released before core/device/world teardown
             if(platformInput) {
                 unsigned char released[256]{};

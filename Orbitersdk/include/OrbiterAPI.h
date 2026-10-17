@@ -50,6 +50,10 @@ extern "C" {
 // Message loop return type - maintain backward compatibility for 32-bit
 #ifdef _WIN64
 #define OAPI_MSGTYPE LRESULT
+#elif defined(__APPLE__) && defined(__LP64__)
+// macOS port: pointers are 64-bit here too; the SDK casts handles through
+// this type, so it must be pointer-sized (upstream Windows 64-bit behaviour).
+#define OAPI_MSGTYPE LRESULT
 #else
 #define OAPI_MSGTYPE int
 #endif

@@ -15,6 +15,11 @@
 #define CALLBACK
 #endif
 
+// MSVC calling-convention keywords are no-ops on clang/macOS.
+#ifndef __cdecl
+#define __cdecl
+#endif
+
 #ifndef WINAPI
 #define WINAPI
 #endif
@@ -117,6 +122,12 @@ using DLGPROC = INT_PTR (CALLBACK *)(HWND, UINT, WPARAM, LPARAM);
 
 #ifndef FAILED
 #define FAILED(hr) (((HRESULT)(hr)) < 0)
+#endif
+
+// Win32 wait sentinel. On Windows it arrives transitively from <windows.h>;
+// the macOS port declares it here so OrbiterPlatform.h is API-equivalent.
+#ifndef INFINITE
+#define INFINITE 0xFFFFFFFF
 #endif
 
 #endif

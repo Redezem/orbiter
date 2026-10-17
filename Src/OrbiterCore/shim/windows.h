@@ -777,5 +777,6 @@ struct VS_FIXEDFILEINFO {
 inline bool VerQueryValueA(const void *block, LPCSTR sub, void **val, UINT *len) { (void)block; (void)sub; if (val) *val = nullptr; if (len) *len = 0; return false; }
 
 #include <winuser.h>
+#include <sync.h>
 
 #endif // ORBITER_MACOS_SHIM_WINDOWS_H

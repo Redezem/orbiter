@@ -280,3 +280,62 @@ set_target_properties(ShuttlePB PROPERTIES
 	LIBRARY_OUTPUT_DIRECTORY ${ORB_MODULE_DIR}
 	PREFIX ""
 )
+
+# LuaInline — the script interpreter module the engine loads on demand.
+# This is what produces the stock "Could not find a module named LuaInline"
+# engine error (Src/Orbiter/Orbiter.cpp LoadModule) when absent: the DG AAP
+# subsystem (oapiCreateInterpreter) and scenario interpreter both retry it.
+# The stock upstream CMakeLists links orbiter/Orbitersdk Windows import libs;
+# the native port resolves those symbols from the main executable instead
+# (same model as the vessel modules above: -undefined dynamic_lookup).
+# gcCoreAPI.h comes from Src/OrbiterCore/sdk_include: the preview host has
+# no D3D9Client, so gcGetCoreInterface() stays NULL and Lua custom-camera
+# calls return nil, exactly like stock runs without the graphics client.
+add_library(LuaInterpreter SHARED
+	${CMAKE_SOURCE_DIR}/Src/Module/LuaScript/LuaInterpreter/Interpreter.cpp
+	${CMAKE_SOURCE_DIR}/Src/Module/LuaScript/LuaInterpreter/lua_vessel_mtd.cpp
+	# Upstream loads the XRSound Lua bindings unconditionally (the call site
+	# has no guard), so the port provides the matching port-side entry points
+	# until the XRSound plugin itself is ported: xrsound.create_instance then
+	# raises a clean Lua error like upstream builds without XRSound support.
+	${CMAKE_CURRENT_SOURCE_DIR}/lua_xrsound_unsupported.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/gccore_custom_camera_unsupported.cpp
+)
+target_include_directories(LuaInterpreter PRIVATE
+	${CMAKE_SOURCE_DIR}/Orbitersdk/include
+	${CMAKE_SOURCE_DIR}/Src/OrbiterCore/shim
+	${CMAKE_SOURCE_DIR}/Src/OrbiterCore/sdk_include
+	${CMAKE_SOURCE_DIR}/Src/Module/LuaScript/LuaInterpreter
+)
+# Upstream expects <windows.h> (and its _stricmp/INFINITE/etc.) transitively
+# via OrbiterPlatform.h on Windows; the native port injects the shim instead,
+# keeping the upstream sources untouched.
+target_compile_options(LuaInterpreter PRIVATE -include windows.h)
+target_link_libraries(LuaInterpreter PRIVATE orb-lua)
+target_link_options(LuaInterpreter PRIVATE -undefined dynamic_lookup)
+set_target_properties(LuaInterpreter PROPERTIES PREFIX "" SUFFIX ".dylib"
+	BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "@loader_path/..;@loader_path"
+	LIBRARY_OUTPUT_DIRECTORY ${ORB_MODULE_DIR})
+
+add_library(LuaInline SHARED
+	${CMAKE_SOURCE_DIR}/Src/Module/LuaScript/LuaInline/LuaInline.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/lua_inline_dependency_init.cpp
+)
+target_include_directories(LuaInline PRIVATE
+	${CMAKE_SOURCE_DIR}/Orbitersdk/include
+	${CMAKE_SOURCE_DIR}/Src/OrbiterCore/shim
+	${CMAKE_SOURCE_DIR}/Src/OrbiterCore/sdk_include
+	${CMAKE_SOURCE_DIR}/Src/Module/LuaScript/LuaInline
+	${CMAKE_SOURCE_DIR}/Src/Module/LuaScript/LuaInterpreter
+)
+target_compile_options(LuaInline PRIVATE -include windows.h)
+target_link_libraries(LuaInline PRIVATE LuaInterpreter orb-lua)
+target_link_options(LuaInline PRIVATE -undefined dynamic_lookup)
+set_target_properties(LuaInline PROPERTIES PREFIX "" SUFFIX ".dylib"
+	BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "@loader_path/..;@loader_path"
+	LIBRARY_OUTPUT_DIRECTORY ${ORB_MODULE_DIR})
+
+add_custom_target(stage-native-lua DEPENDS LuaInterpreter LuaInline)
+add_custom_command(TARGET stage-native-lua POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:LuaInterpreter> ${ORB_NATIVE_CONTENT_DIR}/
+	COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:LuaInline> ${ORB_NATIVE_CONTENT_DIR}/)
